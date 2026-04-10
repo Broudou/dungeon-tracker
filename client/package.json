@@ -1,0 +1,16 @@
+{
+  "name": "dnd5e-tracker-client",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^5.2.0",
+    "@sveltejs/kit": "^2.5.0",
+    "svelte": "^4.2.12",
+    "vite": "^5.2.0"
+  }
+}
