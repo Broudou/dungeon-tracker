@@ -26,10 +26,10 @@
   }
 </script>
 
-<svelte:head><title>Log in — D&D 5e Tracker</title></svelte:head>
+<svelte:head><title>Log In — Dungeon Tracker</title></svelte:head>
 
 <div class="form-card">
-  <h1>Log in</h1>
+  <h1>Enter the Keep</h1>
   <form on:submit|preventDefault={submit}>
     <div class="field">
       <label for="email">Email</label>
@@ -41,10 +41,10 @@
     </div>
     {#if error}<div class="alert alert-error">{error}</div>{/if}
     <button class="btn btn-primary btn-full mt-2" type="submit" disabled={loading}>
-      {loading ? 'Logging in…' : 'Log in'}
+      {loading ? 'Entering…' : 'Log In'}
     </button>
   </form>
-  <p class="text-muted text-sm mt-2" style="text-align:center;">
+  <p class="text-muted text-sm mt-2" style="text-align:center; font-family:var(--font-body);">
     No account? <a href="/register">Register</a>
   </p>
 </div>

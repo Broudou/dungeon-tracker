@@ -28,10 +28,13 @@
   }
 </script>
 
-<svelte:head><title>Register — D&D 5e Tracker</title></svelte:head>
+<svelte:head><title>Register — Dungeon Tracker</title></svelte:head>
 
 <div class="form-card">
-  <h1>Create DM Account</h1>
+  <h1>Claim Your Seat</h1>
+  <p style="font-family:var(--font-body); font-style:italic; color:var(--text-muted); font-size:0.9rem; margin-bottom:1.5rem;">
+    Create your Dungeon Master account
+  </p>
   <form on:submit|preventDefault={submit}>
     <div class="field">
       <label for="email">Email</label>
@@ -47,10 +50,10 @@
     </div>
     {#if error}<div class="alert alert-error">{error}</div>{/if}
     <button class="btn btn-primary btn-full mt-2" type="submit" disabled={loading}>
-      {loading ? 'Creating account…' : 'Create Account'}
+      {loading ? 'Creating…' : 'Create Account'}
     </button>
   </form>
-  <p class="text-muted text-sm mt-2" style="text-align:center;">
-    Already have an account? <a href="/login">Log in</a>
+  <p class="text-muted text-sm mt-2" style="text-align:center; font-family:var(--font-body);">
+    Already have an account? <a href="/login">Log In</a>
   </p>
 </div>

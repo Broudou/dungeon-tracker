@@ -58,7 +58,7 @@
 
   <div class="field">
     <label>Content</label>
-    <textarea bind:value={content} rows="5" placeholder="Describe the scene, discovery, or event…"></textarea>
+    <textarea bind:value={content} rows="5" placeholder="Describe the scene, discovery, or revelation…"></textarea>
   </div>
 
   <div class="pub-actions">
@@ -66,10 +66,10 @@
       {saving ? 'Saving…' : 'Save to Lore'}
     </button>
     <button class="btn btn-primary btn-sm" on:click={pushNow} disabled={!title.trim() || !content.trim()}>
-      {pushed ? '✓ Pushed!' : '▶ Push Now'}
+      {pushed ? 'Revealed!' : 'Reveal Now'}
     </button>
     <button class="btn btn-ghost btn-sm" on:click={saveAndPush} disabled={saving || !title.trim() || !content.trim()}>
-      Save & Push
+      Save &amp; Reveal
     </button>
   </div>
 </div>
@@ -77,17 +77,28 @@
 <style>
   .publisher { margin-bottom: 1rem; }
   .pub-actions { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; }
-  .field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .75rem; }
-  .field label { font-size: .8rem; color: var(--color-text-muted); }
+  .field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .65rem; }
+  .field label {
+    font-family: var(--font-heading);
+    font-size: .68rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
   .field input, .field select, .field textarea {
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
+    background: var(--bg-2);
+    border: 1px solid var(--border-muted);
     border-radius: var(--radius);
-    color: var(--color-text);
+    color: var(--text);
     padding: .4rem .6rem;
+    font-family: var(--font-body);
     font-size: .88rem;
-    font-family: var(--font);
+    transition: border-color .15s;
   }
   .field textarea { resize: vertical; }
-  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--color-accent); }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    outline: none;
+    border-color: var(--gold-dim);
+  }
+  .field select option { background: var(--surface); }
 </style>

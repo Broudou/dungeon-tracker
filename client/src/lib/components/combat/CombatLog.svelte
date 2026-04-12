@@ -13,13 +13,13 @@
   });
 
   const TYPE_COLOR = {
-    damage:   '#e94560',
-    heal:     '#4caf50',
-    condition:'#9b59b6',
-    roll:     '#f1c40f',
-    action:   'var(--color-accent)',
-    dm_note:  '#5dade2',
-    system:   'var(--color-text-muted)',
+    damage:   'var(--crimson)',
+    heal:     'var(--success)',
+    condition:'#7a4ab8',
+    roll:     'var(--warning)',
+    action:   'var(--gold-dim)',
+    dm_note:  '#3a6b8b',
+    system:   'var(--text-dim)',
   };
 
   function sendNote() {
@@ -33,12 +33,14 @@
 <div class="log-wrapper">
   <div class="log-scroll" bind:this={el}>
     {#each entries as entry}
-      <div class="log-entry" style="--type-color:{TYPE_COLOR[entry.type] || 'var(--color-text-muted)'}">
-        <span class="log-time">{new Date(entry.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
+      <div class="log-entry" style="--type-color:{TYPE_COLOR[entry.type] || 'var(--text-dim)'}">
+        <span class="log-time">
+          {new Date(entry.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+        </span>
         <span class="log-msg">{entry.message}</span>
       </div>
     {:else}
-      <p class="empty">Combat log will appear here when combat starts.</p>
+      <p class="empty">The chronicle awaits the first blow…</p>
     {/each}
   </div>
 
@@ -47,72 +49,77 @@
       <input
         class="dm-note-input"
         bind:value={dmNote}
-        placeholder="Add DM note to log…"
+        placeholder="Add DM note to chronicle…"
         maxlength="200"
       />
-      <button class="btn btn-ghost btn-sm" type="submit">Send</button>
+      <button class="btn btn-ghost btn-sm" type="submit">Record</button>
     </form>
   {/if}
 </div>
 
 <style>
-  .log-wrapper {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-  }
+  .log-wrapper { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
   .log-scroll {
     flex: 1;
     overflow-y: auto;
-    padding: .5rem;
+    padding: .4rem .5rem;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    font-family: 'Courier New', monospace;
-    font-size: .78rem;
+    gap: 1px;
   }
+
   .log-entry {
     display: flex;
-    gap: .5rem;
+    gap: .45rem;
     align-items: flex-start;
-    padding: 2px 4px;
-    border-left: 3px solid var(--type-color);
-    padding-left: 6px;
-    border-radius: 0 3px 3px 0;
+    padding: 2px 4px 2px 7px;
+    border-left: 2px solid var(--type-color);
+    border-radius: 0 2px 2px 0;
   }
+
   .log-time {
-    color: var(--color-text-muted);
+    font-family: 'Courier New', monospace;
+    font-size: .68rem;
+    color: var(--text-dim);
     white-space: nowrap;
     flex-shrink: 0;
   }
+
   .log-msg {
-    color: var(--color-text);
+    font-family: var(--font-body);
+    font-size: .82rem;
+    color: var(--text);
     line-height: 1.4;
     word-break: break-word;
   }
+
   .empty {
-    color: var(--color-text-muted);
+    font-family: var(--font-body);
+    font-style: italic;
+    color: var(--text-muted);
     font-size: .85rem;
     text-align: center;
-    padding: 2rem;
-    font-family: var(--font);
+    padding: 2rem 1rem;
   }
+
   .dm-note-form {
     display: flex;
-    gap: .5rem;
-    padding: .5rem;
-    border-top: 1px solid var(--color-border);
+    gap: .4rem;
+    padding: .4rem .5rem;
+    border-top: 1px solid var(--border-muted);
   }
+
   .dm-note-input {
     flex: 1;
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
+    background: var(--bg-2);
+    border: 1px solid var(--border-muted);
     border-radius: var(--radius);
-    color: var(--color-text);
-    padding: .35rem .6rem;
-    font-size: .85rem;
+    color: var(--text);
+    padding: .3rem .55rem;
+    font-family: var(--font-body);
+    font-size: .82rem;
   }
-  .dm-note-input::placeholder { color: var(--color-text-muted); }
-  .dm-note-input:focus { outline: none; border-color: var(--color-accent); }
+  .dm-note-input::placeholder { color: var(--text-dim); }
+  .dm-note-input:focus { outline: none; border-color: var(--gold-dim); }
 </style>

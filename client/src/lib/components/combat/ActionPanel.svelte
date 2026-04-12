@@ -1,61 +1,48 @@
 <script>
   import { getSocket } from '$lib/socket';
 
-  export let currentCombatant = null;  // full combatant object
+  export let currentCombatant = null;
   export let myCharId         = null;
   export let isDM             = false;
-  export let campaign         = null;  // for player list / spell list
+  export let campaign         = null;
   export let sessionId        = null;
+  export let combatants       = [];
 
-  let waiting    = false;
-  let selected   = null;   // 'attack' | 'heal' | 'cast' | 'item' | 'improvise' | bonus/reaction variants
-  let subForm    = {};
-  let freeText   = '';
+  let waiting  = false;
+  let selected = null;
+  let subForm  = {};
+  let freeText = '';
 
-  // Derived: is it my turn?
   $: myTurn = isDM || (currentCombatant && currentCombatant.entityId === myCharId);
-
-  // My character data
   $: myChar = campaign?.players?.find(p => p._id === myCharId);
-
-  // Combat resource state (from currentCombatant if it's mine)
   $: resources = myTurn && currentCombatant ? {
     action:   !currentCombatant.actionSpent,
     bonus:    !currentCombatant.bonusActionSpent,
     reaction: !currentCombatant.reactionSpent,
   } : { action: false, bonus: false, reaction: false };
 
-  const ATTACKS = [
-    { label: 'Attack', type: 'attack', resource: 'action' },
-    { label: 'Offhand Attack', type: 'attack', resource: 'bonus', isBonus: true },
-    { label: 'Opportunity Attack', type: 'attack', resource: 'reaction', isReaction: true },
-  ];
+  $: targetOptions = combatants.filter(c => !c.isDefeated);
+
   const BONUS_ACTIONS = [
-    { label: 'Second Wind', type: 'heal', resource: 'bonus', isBonus: true, selfOnly: true, healDice: '1d10', label2: 'Fighter only' },
-    { label: 'Healing Word', type: 'heal', resource: 'bonus', isBonus: true, healDice: '1d4', label2: 'Bard/Cleric' },
-    { label: 'Flurry of Blows', type: 'multiAttack', resource: 'bonus', isBonus: true, count: 2, label2: 'Monk' },
-    { label: 'Divine Smite', type: 'improvise', resource: 'bonus', isBonus: true, label2: 'Paladin (post-hit)' },
-    { label: 'Rage', type: 'improvise', resource: 'bonus', isBonus: true, label2: 'Barbarian' },
-    { label: 'Cunning Action', type: 'improvise', resource: 'bonus', isBonus: true, label2: 'Rogue' },
-    { label: 'Misty Step', type: 'improvise', resource: 'bonus', isBonus: true, label2: 'Warlock/Wizard' },
-    { label: 'Wild Shape', type: 'improvise', resource: 'bonus', isBonus: true, label2: 'Druid' },
-    { label: 'Hex / Hunter\'s Mark', type: 'improvise', resource: 'bonus', isBonus: true, label2: 'Warlock/Ranger' },
-    { label: 'Bardic Inspiration', type: 'improvise', resource: 'bonus', isBonus: true, label2: 'Bard' },
+    { label: 'Second Wind',       type: 'heal',      resource: 'bonus', isBonus: true, selfOnly: true, healDice: '1d10', label2: 'Fighter' },
+    { label: 'Healing Word',      type: 'heal',      resource: 'bonus', isBonus: true, healDice: '1d4',  label2: 'Bard/Cleric' },
+    { label: 'Flurry of Blows',   type: 'multiAttack',resource:'bonus', isBonus: true, count: 2,         label2: 'Monk' },
+    { label: 'Divine Smite',      type: 'improvise', resource: 'bonus', isBonus: true,                   label2: 'Paladin' },
+    { label: 'Rage',              type: 'improvise', resource: 'bonus', isBonus: true,                   label2: 'Barbarian' },
+    { label: 'Cunning Action',    type: 'improvise', resource: 'bonus', isBonus: true,                   label2: 'Rogue' },
+    { label: 'Misty Step',        type: 'improvise', resource: 'bonus', isBonus: true,                   label2: 'Warlock/Wizard' },
+    { label: 'Wild Shape',        type: 'improvise', resource: 'bonus', isBonus: true,                   label2: 'Druid' },
+    { label: "Hex / Hunter's Mark",type:'improvise', resource: 'bonus', isBonus: true,                   label2: 'Warlock/Ranger' },
+    { label: 'Bardic Inspiration',type: 'improvise', resource: 'bonus', isBonus: true,                   label2: 'Bard' },
   ];
   const REACTIONS = [
-    { label: 'Shield', type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Wizard' },
-    { label: 'Hellish Rebuke', type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Warlock' },
-    { label: 'Counterspell', type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Caster' },
-    { label: 'Absorb Elements', type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Various' },
+    { label: 'Shield',           type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Wizard' },
+    { label: 'Hellish Rebuke',   type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Warlock' },
+    { label: 'Counterspell',     type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Caster' },
+    { label: 'Absorb Elements',  type: 'improvise', resource: 'reaction', isReaction: true, label2: 'Various' },
   ];
 
-  function selectAction(a) {
-    selected = a;
-    subForm  = {};
-    freeText = '';
-    if (a.selfOnly) subForm.targetInstanceId = currentCombatant?.instanceId;
-  }
-
+  function selectAction(a) { selected = a; subForm = {}; freeText = ''; if (a.selfOnly) subForm.targetInstanceId = currentCombatant?.instanceId; }
   function cancel() { selected = null; waiting = false; }
 
   function submit() {
@@ -63,64 +50,45 @@
     if (!s) return;
 
     let description = selected.label;
-    const params = {
-      ...subForm,
-      isBonus:    !!selected.isBonus,
-      isReaction: !!selected.isReaction,
-    };
+    const params = { ...subForm, isBonus: !!selected.isBonus, isReaction: !!selected.isReaction };
 
     if (selected.type === 'attack') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${subForm.damageDice || '1d8'} ${subForm.damageType || ''})`;
     } else if (selected.type === 'heal') {
-      description = `${selected.label} → ${subForm.targetName || 'target'} (${selected.healDice || subForm.healDice || '1d8'} + ${subForm.healModifier || 0})`;
+      description = `${selected.label} → ${subForm.targetName || 'target'} (${selected.healDice || subForm.healDice || '1d8'}+${subForm.healModifier || 0})`;
       params.healDice = selected.healDice || subForm.healDice || '1d8';
     } else if (selected.type === 'improvise' || selected.type === 'cast') {
       description = freeText || selected.label;
     }
 
     if (isDM) {
-      // DM resolves immediately
-      s.emit('combat:approveAction', {
-        actionId: 'dm-' + Date.now(),
-        override: { ...params, description, submitterName: 'DM' },
-      });
-      // Actually DM uses direct emits for most things — submit as pending + auto approve
       s.emit('combat:dmNote', { message: `DM: ${description}` });
     } else {
-      s.emit('combat:submitAction', {
-        actionType:  selected.type,
-        description,
-        params,
-      });
+      s.emit('combat:submitAction', { actionType: selected.type, description, params });
       waiting = true;
     }
     selected = null;
   }
-
-  // All combatants for target selection
-  export let combatants = [];
-  $: targetOptions = combatants.filter(c => !c.isDefeated);
 </script>
 
 <div class="panel">
   {#if !myTurn}
     <div class="waiting-state">
       <span class="wait-dot">◌</span>
-      Waiting for {currentCombatant?.name ?? '…'}
+      Awaiting {currentCombatant?.name ?? '…'}
     </div>
 
   {:else if waiting}
     <div class="waiting-state">
       <span class="wait-dot">◌</span>
-      Waiting for DM approval…
+      Awaiting DM approval…
       <button class="btn btn-ghost btn-sm" on:click={cancel}>Cancel</button>
     </div>
 
   {:else if selected}
-    <!-- Sub-form -->
     <div class="sub-form">
       <div class="sub-form-header">
-        <strong>{selected.label}</strong>
+        <strong style="font-family:var(--font-heading); font-size:.88rem;">{selected.label}</strong>
         <button class="btn btn-ghost btn-sm" on:click={cancel}>✕</button>
       </div>
 
@@ -135,20 +103,6 @@
             {/each}
           </select>
         </div>
-        {#if myChar?.attackSummary?.length}
-          <div class="field-row">
-            <label>Weapon</label>
-            <select on:change={e => {
-              const atk = myChar.attackSummary[e.target.value];
-              if (atk) { subForm.attackBonus = atk.attackBonus; subForm.damageDice = atk.damageDice; subForm.damageType = atk.damageType; }
-            }}>
-              <option value="">— select or fill below —</option>
-              {#each myChar.attackSummary as atk, i}
-                <option value={i}>{atk.name} (+{atk.attackBonus} / {atk.damageDice})</option>
-              {/each}
-            </select>
-          </div>
-        {/if}
         <div class="field-row">
           <label>Attack Bonus</label>
           <input type="number" bind:value={subForm.attackBonus} placeholder="+5" />
@@ -190,7 +144,7 @@
 
       {:else if selected.type === 'cast'}
         <div class="field-row">
-          <label>Spell</label>
+          <label>Spell Description</label>
           <input bind:value={freeText} placeholder="Spell name + details…" />
         </div>
         <div class="field-row">
@@ -203,7 +157,6 @@
         </div>
 
       {:else}
-        <!-- Improvise / bonus / reaction -->
         <div class="field-row">
           <label>Description</label>
           <input bind:value={freeText} placeholder="Describe the action…" />
@@ -216,7 +169,6 @@
     </div>
 
   {:else}
-    <!-- Main action chooser -->
     <div class="action-chooser">
       <div class="resource-row">
         <span class="res" class:spent={!resources.action}>Action</span>
@@ -225,23 +177,31 @@
       </div>
 
       <div class="action-section">
-        <p class="section-label">ACTIONS</p>
+        <p class="section-label">Actions</p>
         <div class="btn-grid">
-          <button class="action-btn" class:disabled={!resources.action} on:click={() => selectAction({ label:'Attack', type:'attack', resource:'action' })}>⚔ Attack</button>
-          <button class="action-btn" on:click={() => selectAction({ label:'Cast Spell', type:'cast', resource:'action' })}>✨ Cast Spell</button>
-          <button class="action-btn" on:click={() => selectAction({ label:'Heal (Cure Wounds)', type:'heal', resource:'action', healDice:'1d8' })}>❤ Heal</button>
-          <button class="action-btn" on:click={() => selectAction({ label:'Dodge', type:'improvise', resource:'action' })}>🛡 Dodge</button>
-          <button class="action-btn" on:click={() => selectAction({ label:'Help', type:'improvise', resource:'action' })}>🤝 Help</button>
-          <button class="action-btn" on:click={() => selectAction({ label:'Use Item', type:'improvise', resource:'action' })}>🎒 Use Item</button>
-          <button class="action-btn" on:click={() => selectAction({ label:'Improvise', type:'improvise', resource:'action' })}>✎ Improvise</button>
+          <button class="action-btn" class:disabled={!resources.action}
+            on:click={() => selectAction({ label:'Attack', type:'attack', resource:'action' })}>Attack</button>
+          <button class="action-btn"
+            on:click={() => selectAction({ label:'Cast Spell', type:'cast', resource:'action' })}>Cast Spell</button>
+          <button class="action-btn"
+            on:click={() => selectAction({ label:'Heal', type:'heal', resource:'action', healDice:'1d8' })}>Heal</button>
+          <button class="action-btn"
+            on:click={() => selectAction({ label:'Dodge', type:'improvise', resource:'action' })}>Dodge</button>
+          <button class="action-btn"
+            on:click={() => selectAction({ label:'Help', type:'improvise', resource:'action' })}>Help</button>
+          <button class="action-btn"
+            on:click={() => selectAction({ label:'Use Item', type:'improvise', resource:'action' })}>Use Item</button>
+          <button class="action-btn"
+            on:click={() => selectAction({ label:'Improvise', type:'improvise', resource:'action' })}>Improvise</button>
         </div>
       </div>
 
       <div class="action-section">
-        <p class="section-label">BONUS ACTIONS</p>
+        <p class="section-label">Bonus Actions</p>
         <div class="btn-grid">
           {#each BONUS_ACTIONS as a}
-            <button class="action-btn action-btn--small" class:disabled={!resources.bonus} on:click={() => selectAction(a)}>
+            <button class="action-btn action-btn--small" class:disabled={!resources.bonus}
+              on:click={() => selectAction(a)}>
               {a.label}
               <span class="action-source">{a.label2}</span>
             </button>
@@ -250,10 +210,11 @@
       </div>
 
       <div class="action-section">
-        <p class="section-label">REACTIONS</p>
+        <p class="section-label">Reactions</p>
         <div class="btn-grid">
           {#each REACTIONS as a}
-            <button class="action-btn action-btn--small" class:disabled={!resources.reaction} on:click={() => selectAction(a)}>
+            <button class="action-btn action-btn--small" class:disabled={!resources.reaction}
+              on:click={() => selectAction(a)}>
               {a.label}
               <span class="action-source">{a.label2}</span>
             </button>
@@ -265,58 +226,71 @@
 </div>
 
 <style>
-  .panel { height: 100%; overflow-y: auto; padding: .5rem; }
+  .panel { height: 100%; overflow-y: auto; padding: .45rem; }
 
   .waiting-state {
-    display: flex;
-    align-items: center;
-    gap: .5rem;
-    color: var(--color-text-muted);
-    font-size: .85rem;
-    padding: .75rem;
-    justify-content: center;
+    display: flex; align-items: center; gap: .5rem;
+    font-family: var(--font-body); font-style: italic;
+    color: var(--text-muted); font-size: .88rem;
+    padding: .65rem; justify-content: center;
   }
-  .wait-dot { animation: pulse 1.5s infinite; color: var(--color-accent); }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .wait-dot { animation: pulse 1.5s infinite; color: var(--gold); }
 
-  .resource-row { display: flex; gap: .5rem; margin-bottom: .75rem; }
-  .res { font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--color-accent); color: #111; }
-  .res.spent { background: var(--color-border); color: var(--color-text-muted); text-decoration: line-through; }
+  .resource-row { display: flex; gap: .4rem; margin-bottom: .6rem; }
+  .res {
+    font-family: var(--font-heading); font-size: .68rem; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px;
+    background: var(--gold-dim); color: var(--bg);
+    border: 1px solid var(--gold);
+  }
+  .res.spent {
+    background: var(--border-muted); color: var(--text-dim);
+    border-color: var(--border-muted); text-decoration: line-through;
+  }
 
-  .action-section { margin-bottom: .75rem; }
-  .section-label { font-size: .65rem; font-weight: 700; letter-spacing: .1em; color: var(--color-text-muted); margin-bottom: .35rem; }
-  .btn-grid { display: flex; flex-wrap: wrap; gap: .3rem; }
+  .action-section { margin-bottom: .65rem; }
+  .section-label {
+    font-family: var(--font-heading); font-size: .62rem; font-weight: 700;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--gold-dim); margin-bottom: .3rem;
+    border-bottom: 1px solid var(--border-muted); padding-bottom: .15rem;
+  }
+  .btn-grid { display: flex; flex-wrap: wrap; gap: .25rem; }
   .action-btn {
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
+    background: var(--surface-2);
+    border: 1px solid var(--border-muted);
     border-radius: var(--radius);
-    color: var(--color-text);
-    padding: .35rem .7rem;
-    font-size: .8rem;
+    color: var(--text);
+    font-family: var(--font-heading);
+    font-size: .75rem;
+    letter-spacing: .03em;
+    padding: .3rem .65rem;
     cursor: pointer;
     transition: border-color .1s, background .1s;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1px;
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
   }
-  .action-btn:hover:not(.disabled) { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-surface); }
-  .action-btn.disabled { opacity: .4; cursor: not-allowed; }
-  .action-btn--small { font-size: .72rem; padding: .25rem .5rem; }
-  .action-source { font-size: .6rem; color: var(--color-text-muted); }
+  .action-btn:hover:not(.disabled) { border-color: var(--gold-dim); color: var(--gold); }
+  .action-btn.disabled { opacity: .35; cursor: not-allowed; }
+  .action-btn--small { font-size: .68rem; padding: .2rem .5rem; }
+  .action-source { font-family: var(--font-body); font-size: .6rem; color: var(--text-dim); font-style: italic; }
 
-  .sub-form { display: flex; flex-direction: column; gap: .5rem; }
-  .sub-form-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .25rem; font-size: .9rem; }
-  .field-row { display: flex; flex-direction: column; gap: .2rem; }
-  .field-row label { font-size: .75rem; color: var(--color-text-muted); }
-  .field-row input, .field-row select {
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    color: var(--color-text);
-    padding: .3rem .5rem;
-    font-size: .82rem;
+  .sub-form { display: flex; flex-direction: column; gap: .45rem; }
+  .sub-form-header { display: flex; align-items: center; justify-content: space-between; }
+  .field-row { display: flex; flex-direction: column; gap: .15rem; }
+  .field-row label {
+    font-family: var(--font-heading); font-size: .68rem; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-muted);
   }
-  .field-row input:focus, .field-row select:focus { outline: none; border-color: var(--color-accent); }
-  .sub-submit { margin-top: .25rem; }
+  .field-row input, .field-row select {
+    background: var(--bg-2);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: .28rem .5rem;
+    font-family: var(--font-body);
+    font-size: .85rem;
+  }
+  .field-row input:focus, .field-row select:focus { outline: none; border-color: var(--gold-dim); }
+  .sub-submit { margin-top: .15rem; }
 </style>

@@ -21,7 +21,6 @@
 
       sessionData = data;
 
-      // Fetch campaign roster so player can pick their character
       const cRes = await fetch(`/api/campaigns/${data.campaignId}`, { credentials: 'include' });
       if (cRes.ok) campaign = await cRes.json();
     } catch {
@@ -33,7 +32,6 @@
 
   function handleJoin() {
     if (!displayName.trim()) return;
-    // Store player identity for the session view
     sessionStorage.setItem(`session_${sessionData.sessionId}`, JSON.stringify({
       displayName: displayName.trim(),
       characterId: selectedPlayerId || null,
@@ -43,36 +41,39 @@
 </script>
 
 <svelte:head>
-  <title>Join Session {key} — D&D 5e Tracker</title>
+  <title>Enter Session {key} — Dungeon Tracker</title>
 </svelte:head>
 
 <div class="page">
   <div class="container">
     <div class="form-card">
       {#if loading}
-        <div class="loading">Validating join key…</div>
+        <div class="loading">Verifying passage</div>
       {:else if error}
-        <h1>Can't Join</h1>
-        <div class="alert alert-error">{error}</div>
-        <a href="/" class="btn btn-ghost btn-full mt-2">← Back to Home</a>
+        <h1 style="color:var(--gold);">Entry Denied</h1>
+        <div class="alert alert-error mt-2">{error}</div>
+        <a href="/" class="btn btn-ghost btn-full mt-2">← Return Home</a>
       {:else}
-        <h1>Join Session</h1>
-        <p class="text-muted text-sm" style="margin-bottom:1.5rem;">
-          Key: <strong style="letter-spacing:.1em;">{key}</strong>
-          {#if campaign} · Campaign: <strong>{campaign.name}</strong>{/if}
+        <h1>Enter the Hall</h1>
+        <p class="text-muted" style="font-family:var(--font-body); font-style:italic; font-size:0.9rem; margin-bottom:1.5rem;">
+          Key: <strong style="font-family:var(--font-heading); letter-spacing:0.1em; color:var(--gold);">{key}</strong>
+          {#if campaign}
+            &nbsp;·&nbsp; <strong style="color:var(--text);">{campaign.name}</strong>
+          {/if}
         </p>
 
         <form on:submit|preventDefault={handleJoin}>
           <div class="field">
-            <label for="displayName">Your Display Name</label>
-            <input id="displayName" bind:value={displayName} placeholder="How should the DM see you?" required />
+            <label for="displayName">Your Name</label>
+            <input id="displayName" bind:value={displayName}
+              placeholder="How shall the DM know you?" required />
           </div>
 
           {#if campaign?.players?.length > 0}
             <div class="field">
-              <label for="character">Select Your Character (optional)</label>
+              <label for="character">Claim Your Character</label>
               <select id="character" bind:value={selectedPlayerId}>
-                <option value="">— No character / spectator —</option>
+                <option value="">— Spectator / no character —</option>
                 {#each campaign.players as p}
                   <option value={p._id}>
                     {p.name} — Lv {p.level} {p.race} {p.class}
@@ -82,14 +83,11 @@
             </div>
           {/if}
 
-          <button class="btn btn-primary btn-full mt-2" type="submit" disabled={joining || !displayName.trim()}>
-            {joining ? 'Joining…' : 'Enter Session'}
+          <button class="btn btn-primary btn-full mt-2" type="submit"
+            disabled={joining || !displayName.trim()}>
+            {joining ? 'Entering…' : 'Enter Session'}
           </button>
         </form>
-
-        <p class="text-muted text-sm mt-2" style="text-align:center;">
-          Real-time features arrive in Phase 2.
-        </p>
       {/if}
     </div>
   </div>
