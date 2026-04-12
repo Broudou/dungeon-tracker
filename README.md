@@ -105,7 +105,7 @@ PORT=3001
 MONGO_URI=mongodb://127.0.0.1:27017/dungeon-tracker
 JWT_SECRET=<generate a long random string — see below>
 NODE_ENV=production
-CLIENT_ORIGIN=https://yourdomain.com
+CLIENT_ORIGIN=http://54.37.230.173
 ```
 
 Generate a secure secret:
@@ -200,23 +200,12 @@ Create the Nginx config:
 sudo nano /etc/nginx/sites-available/dungeon-tracker
 ```
 
-Paste the following (replace `yourdomain.com`):
+Paste the following:
 
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com www.yourdomain.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name yourdomain.com www.yourdomain.com;
-
-    ssl_certificate     /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         HIGH:!aNULL:!MD5;
+    server_name 54.37.230.173;
 
     # Required for Socket.IO WebSocket connections
     proxy_buffer_size       128k;
@@ -252,19 +241,7 @@ sudo systemctl reload nginx
 
 ---
 
-### 10. SSL with Let's Encrypt
-
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
-
-# Test auto-renewal
-sudo certbot renew --dry-run
-```
-
----
-
-### 11. Firewall
+### 10. Firewall
 
 ```bash
 sudo ufw allow OpenSSH
@@ -275,7 +252,7 @@ sudo ufw status
 
 ---
 
-### 12. Verify the deployment
+### 11. Verify the deployment
 
 ```bash
 # Server process running
@@ -291,7 +268,7 @@ sudo systemctl status nginx
 pm2 logs dungeon-tracker --lines 50
 
 # API health check
-curl https://yourdomain.com/api/auth/me
+curl http://54.37.230.173/api/auth/me
 # Expected: 401 {"message":"Not authenticated"}
 ```
 
@@ -405,12 +382,12 @@ dungeon-tracker/
 2. Create a campaign at `/dashboard`
 3. Add player characters and lore entries in the campaign editor at `/campaign/:id`
 4. Click **Start Session** — generates a 6-character join code
-5. Share the code: `yourdomain.com/join/ABC123`
+5. Share the code: `54.37.230.173/join/ABC123`
 6. Session opens at `/session/:id` with 4 tabs: **Combat**, **World**, **Characters**, **Lore**
 
 ### Players
 
-1. Go to `yourdomain.com/join/ABC123` (or enter code on the landing page)
+1. Go to `54.37.230.173/join/ABC123` (or enter code on the landing page)
 2. Enter a display name and select a character from the campaign roster
 3. Land on the live session view — 3 tabs: **Combat**, **World**, **Characters**
 4. During combat: action panel unlocks on your turn; actions require DM approval before resolving
@@ -470,6 +447,112 @@ The server uses `'dev-secret'` as a fallback. This is insecure in production. Al
 ```bash
 pm2 delete dungeon-tracker
 pm2 start server.js --name dungeon-tracker
+```
+
+---
+
+## SSL and Custom Domain
+
+This section assumes the application is already running on `54.37.230.173` via HTTP and you now want to attach a domain name and serve over HTTPS.
+
+### Prerequisites
+
+- A registered domain (e.g. `yourdomain.com`) with an **A record** pointing to `54.37.230.173`
+- DNS propagation confirmed: `dig yourdomain.com +short` should return `54.37.230.173`
+
+### 1. Install Certbot
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+```
+
+### 2. Update the Nginx config for the domain
+
+Edit `/etc/nginx/sites-available/dungeon-tracker` and replace the existing `server` block with:
+
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name yourdomain.com www.yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # Required for Socket.IO WebSocket connections
+    proxy_buffer_size       128k;
+    proxy_buffers           4 256k;
+    proxy_busy_buffers_size 256k;
+
+    location / {
+        proxy_pass         http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+
+        # WebSocket upgrade headers — do not remove
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Long timeout keeps Socket.IO connections alive
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+### 3. Obtain the SSL certificate
+
+```bash
+sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+
+# Test auto-renewal
+sudo certbot renew --dry-run
+```
+
+Certbot will write the certificate paths into the Nginx config automatically if they are not already present.
+
+### 4. Update the environment variable
+
+Edit `server/.env` and change `CLIENT_ORIGIN` to use the domain over HTTPS:
+
+```env
+CLIENT_ORIGIN=https://yourdomain.com
+```
+
+Then restart the server:
+
+```bash
+pm2 restart dungeon-tracker
+```
+
+### 5. Reload Nginx
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### 6. Verify
+
+```bash
+curl https://yourdomain.com/api/auth/me
+# Expected: 401 {"message":"Not authenticated"}
+```
+
+Auto-renewal is handled by a systemd timer that Certbot installs automatically. Verify it is active:
+
+```bash
+sudo systemctl status certbot.timer
 ```
 
 ---
