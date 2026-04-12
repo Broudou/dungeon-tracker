@@ -33,8 +33,11 @@
 
   function handleJoin() {
     if (!displayName.trim()) return;
-    // Phase 2: will establish WebSocket connection here.
-    // For now, navigate to the session view.
+    // Store player identity for the session view
+    sessionStorage.setItem(`session_${sessionData.sessionId}`, JSON.stringify({
+      displayName: displayName.trim(),
+      characterId: selectedPlayerId || null,
+    }));
     goto(`/session/${sessionData.sessionId}`);
   }
 </script>

@@ -24,6 +24,12 @@ const SessionSchema = new mongoose.Schema({
     enum: ['active', 'ended'],
     default: 'active',
   },
+  pushedLore: [{
+    title:    { type: String, default: 'Untitled' },
+    category: { type: String, default: 'Other' },
+    content:  { type: String, default: '' },
+    pushedAt: { type: Date,   default: Date.now },
+  }],
 }, { timestamps: true });
 
 SessionSchema.index({ joinKey: 1 });
