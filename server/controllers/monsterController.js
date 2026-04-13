@@ -8,7 +8,6 @@ exports.list = async (req, res) => {
     if (req.query.type) filter.type = { $regex: req.query.type, $options: 'i' };
 
     const monsters = await Monster.find(filter)
-      .select('name cr type size alignment hp AC speed')
       .sort('name')
       .limit(200);
     res.json(monsters);

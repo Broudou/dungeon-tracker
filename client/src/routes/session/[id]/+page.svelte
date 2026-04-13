@@ -485,10 +485,22 @@
                 <div class="ref-meta-row">
                   {#if spell.castingTime}<span><strong>Cast:</strong> {spell.castingTime}</span>{/if}
                   {#if spell.range}<span><strong>Range:</strong> {spell.range}</span>{/if}
+                  {#if spell.duration}<span><strong>Duration:</strong> {spell.duration}</span>{/if}
+                  {#if spell.components}<span><strong>Components:</strong> {spell.components}</span>{/if}
                   {#if spell.concentration}<span class="pill pill-yellow">Concentration</span>{/if}
                 </div>
-                {#if spell.classes?.length}
-                  <div class="ref-classes">{spell.classes.join(', ')}</div>
+                {#if spell.damageDice || spell.damageType || spell.healDice}
+                  <div class="ref-meta-row" style="margin-top: 0.25rem;">
+                    {#if spell.damageDice}<span><strong>Damage:</strong> {spell.damageDice}{spell.damageType ? ` ${spell.damageType}` : ''}</span>{/if}
+                    {#if spell.healDice}<span><strong>Heal:</strong> {spell.healDice}</span>{/if}
+                    {#if spell.saveAbility}<span><strong>Save:</strong> {spell.saveAbility}{spell.halfOnSave ? ' (half on save)' : ''}</span>{/if}
+                  </div>
+                {/if}
+                {#if spell.description}
+                  <p class="ref-description">{spell.description}</p>
+                {/if}
+                {#if spell.classes}
+                  <div class="ref-classes">{spell.classes}</div>
                 {/if}
               </div>
             {/if}
@@ -521,13 +533,95 @@
         </div>
         {#if open}
           <div class="ref-card-body">
+            <!-- Core stats -->
             <div class="ref-meta-row">
               {#if creature.size}<span><strong>Size:</strong> {creature.size}</span>{/if}
               {#if creature.alignment}<span><strong>Alignment:</strong> {creature.alignment}</span>{/if}
               {#if creature.AC != null}<span><strong>AC:</strong> {creature.AC}</span>{/if}
-              {#if creature.hp != null}<span><strong>HP:</strong> {creature.hp}</span>{/if}
+              {#if creature.hp?.average != null}<span><strong>HP:</strong> {creature.hp.average}{creature.hp.diceExpression ? ` (${creature.hp.diceExpression})` : ''}</span>{/if}
               {#if creature.speed}<span><strong>Speed:</strong> {creature.speed}</span>{/if}
+              {#if creature.senses}<span><strong>Senses:</strong> {creature.senses}</span>{/if}
+              {#if creature.languages}<span><strong>Languages:</strong> {creature.languages}</span>{/if}
             </div>
+
+            <!-- Ability scores -->
+            {#if creature.stats}
+              <div class="ref-stat-row">
+                {#each ['STR','DEX','CON','INT','WIS','CHA'] as s}
+                  {@const val = creature.stats[s] ?? 10}
+                  {@const mod = Math.floor((val - 10) / 2)}
+                  <div class="ref-stat-box">
+                    <span class="ref-stat-label">{s}</span>
+                    <span class="ref-stat-val">{val}</span>
+                    <span class="ref-stat-mod">{mod >= 0 ? '+' : ''}{mod}</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            <!-- Saving throws & skills -->
+            {#if creature.savingThrows && Object.keys(creature.savingThrows).length}
+              <div class="ref-meta-row" style="margin-top:0.25rem;">
+                <span><strong>Saves:</strong> {Object.entries(creature.savingThrows).map(([k,v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}</span>
+              </div>
+            {/if}
+            {#if creature.skills && Object.keys(creature.skills).length}
+              <div class="ref-meta-row">
+                <span><strong>Skills:</strong> {Object.entries(creature.skills).map(([k,v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}</span>
+              </div>
+            {/if}
+
+            <!-- Resistances / immunities / vulnerabilities -->
+            {#if creature.resistances?.length}
+              <div class="ref-meta-row"><span><strong>Resistances:</strong> {creature.resistances.join(', ')}</span></div>
+            {/if}
+            {#if creature.immunities?.length}
+              <div class="ref-meta-row"><span><strong>Immunities:</strong> {creature.immunities.join(', ')}</span></div>
+            {/if}
+            {#if creature.vulnerabilities?.length}
+              <div class="ref-meta-row"><span><strong>Vulnerabilities:</strong> {creature.vulnerabilities.join(', ')}</span></div>
+            {/if}
+
+            <!-- Traits -->
+            {#if creature.traits?.length}
+              <div class="ref-section-title">Traits</div>
+              {#each creature.traits as t}
+                <div class="ref-action"><strong>{t.name}.</strong> {t.description}</div>
+              {/each}
+            {/if}
+
+            <!-- Actions -->
+            {#if creature.actions?.length}
+              <div class="ref-section-title">Actions</div>
+              {#each creature.actions as a}
+                <div class="ref-action">
+                  <strong>{a.name}.</strong> {a.description}
+                  {#if a.attackBonus != null || a.damageDice}
+                    <span class="ref-action-stats">
+                      {#if a.attackBonus != null}+{a.attackBonus} to hit{/if}
+                      {#if a.damageDice} · {a.damageDice}{a.damageType ? ` ${a.damageType}` : ''}{/if}
+                      {#if a.saveDC} · DC {a.saveDC} {a.saveAbility}{/if}
+                    </span>
+                  {/if}
+                </div>
+              {/each}
+            {/if}
+
+            <!-- Reactions -->
+            {#if creature.reactions?.length}
+              <div class="ref-section-title">Reactions</div>
+              {#each creature.reactions as r}
+                <div class="ref-action"><strong>{r.name}.</strong> {r.description}</div>
+              {/each}
+            {/if}
+
+            <!-- Legendary Actions -->
+            {#if creature.legendaryActions?.length}
+              <div class="ref-section-title">Legendary Actions</div>
+              {#each creature.legendaryActions as la}
+                <div class="ref-action"><strong>{la.name}.</strong> {la.description}</div>
+              {/each}
+            {/if}
           </div>
         {/if}
       </button>
@@ -1301,5 +1395,51 @@
     color: var(--text-faint);
     font-style: italic;
   }
+  .ref-description {
+    margin: 0.375rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .ref-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    margin: 0.5rem 0 0.2rem;
+    padding-bottom: 0.15rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .ref-action {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+    line-height: 1.45;
+  }
+  .ref-action-stats {
+    font-size: 0.75rem;
+    color: var(--text-faint);
+    margin-left: 0.25rem;
+  }
+  .ref-stat-row {
+    display: flex;
+    gap: 0.375rem;
+    margin: 0.375rem 0 0.25rem;
+  }
+  .ref-stat-box {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.25rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .ref-stat-label { font-size: 0.6rem; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
+  .ref-stat-val   { font-size: 0.875rem; font-weight: 700; }
+  .ref-stat-mod   { font-size: 0.7rem; color: var(--text-muted); }
   .ref-empty { color: var(--text-muted); font-size: 0.875rem; padding: 1rem 0; }
 </style>

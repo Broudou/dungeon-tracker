@@ -9,7 +9,6 @@ exports.list = async (req, res) => {
     if (req.query.class) filter.classes = { $regex: req.query.class, $options: 'i' };
 
     const spells = await Spell.find(filter)
-      .select('name level school castingTime range concentration classes')
       .sort({ level: 1, name: 1 })
       .limit(500);
     res.json(spells);
