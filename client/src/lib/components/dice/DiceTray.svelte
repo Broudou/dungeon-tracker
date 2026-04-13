@@ -17,18 +17,14 @@
 
   function parseDice(expr) {
     const parts = expr.toLowerCase().split('+').map(p => p.trim()).filter(Boolean);
-    let total = 0;
-    const breakdown = [];
+    let total = 0; const breakdown = [];
     for (const part of parts) {
       if (part.includes('d')) {
         const [nc, sc] = part.split('d');
         const n = parseInt(nc || '1', 10);
         const s = parseInt(sc, 10);
         if (isNaN(n) || isNaN(s)) continue;
-        for (let i = 0; i < n; i++) {
-          const r = Math.floor(Math.random() * s) + 1;
-          breakdown.push(r); total += r;
-        }
+        for (let i = 0; i < n; i++) { const r = Math.floor(Math.random() * s) + 1; breakdown.push(r); total += r; }
       } else {
         const mod = parseInt(part, 10);
         if (!isNaN(mod)) { total += mod; breakdown.push(mod); }
@@ -58,164 +54,180 @@
     lastResult = { formula, detail, total: resultValue };
 
     if (!isPrivate) {
-      getSocket()?.emit('roll:public', {
-        formula,
-        result:   resultValue,
-        rollType: 'free',
-        context:  `${formula} → ${detail}`,
-      });
+      getSocket()?.emit('roll:public', { formula, result: resultValue, rollType: 'free', context: `${formula} → ${detail}` });
     }
   }
 
   function clear() { formula = ''; lastResult = null; }
+
+  function toggleAdv(which) {
+    if (which === 'adv') { advantage = !advantage; if (advantage) disadv = false; }
+    else { disadv = !disadv; if (disadv) advantage = false; }
+  }
 </script>
 
+<!-- Floating action button -->
+<button
+  class="fab"
+  class:fab-open={open}
+  on:click={() => open = !open}
+  title="Dice Tray"
+  aria-label="Toggle dice tray"
+  aria-expanded={open}
+>
+  ⚄
+</button>
+
 {#if open}
-  <div class="tray-backdrop" on:click={() => open = false}></div>
-  <div class="tray">
-    <div class="tray-header">
+  <!-- Click-outside backdrop -->
+  <div class="tray-backdrop" on:click={() => open = false} role="presentation"></div>
+
+  <div class="tray" role="dialog" aria-label="Dice tray">
+    <div class="tray-head">
       <span class="tray-title">Dice Tray</span>
       <button class="btn btn-ghost btn-sm" on:click={() => open = false}>✕</button>
     </div>
 
+    <!-- Quick-add dice -->
     <div class="dice-row">
       {#each DICE as d}
         <button class="die-btn" on:click={() => addDie(d)}>d{d}</button>
       {/each}
     </div>
 
+    <!-- Formula input -->
     <div class="formula-row">
       <input
         class="formula-input"
         bind:value={formula}
         placeholder="2d6+3"
+        aria-label="Dice formula"
         on:keydown={e => e.key === 'Enter' && roll()}
       />
       <button class="btn btn-primary btn-sm" on:click={roll} disabled={!formula.trim()}>Roll</button>
       <button class="btn btn-ghost btn-sm" on:click={clear}>Clear</button>
     </div>
 
-    <div class="options-row">
-      <label class:active={advantage}>
-        <input type="checkbox" bind:checked={advantage} on:change={() => { if(advantage) disadv = false; }} />
-        Adv
-      </label>
-      <label class:active={disadv}>
-        <input type="checkbox" bind:checked={disadv} on:change={() => { if(disadv) advantage = false; }} />
-        Dis
-      </label>
-      <label class:active={isPrivate}>
-        <input type="checkbox" bind:checked={isPrivate} />
-        Private
-      </label>
+    <!-- Options -->
+    <div class="opts-row">
+      <button class="opt-btn" class:active={advantage}    on:click={() => toggleAdv('adv')}>Adv</button>
+      <button class="opt-btn" class:active={disadv}       on:click={() => toggleAdv('dis')}>Dis</button>
+      <button class="opt-btn" class:active={isPrivate}    on:click={() => isPrivate = !isPrivate}>Private</button>
     </div>
 
+    <!-- Last result -->
     {#if lastResult}
       <div class="last-result">
-        <span class="result-formula">{lastResult.formula}</span>
-        <span class="result-detail">→ {lastResult.detail}</span>
-        <span class="result-total">{lastResult.total}</span>
+        <span class="res-formula">{lastResult.formula}</span>
+        <span class="res-detail">{lastResult.detail}</span>
+        <span class="res-total">{lastResult.total}</span>
       </div>
     {/if}
   </div>
 {/if}
 
-<button class="tray-fab" class:open on:click={() => open = !open} title="Dice Tray">
-  ⚄
-</button>
-
 <style>
-  .tray-fab {
+  .fab {
     position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
-    width: 48px; height: 48px;
+    bottom: 1.25rem;
+    right: 1.25rem;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
-    background: var(--surface-2);
-    border: 2px solid var(--border);
-    color: var(--gold);
-    font-size: 1.3rem;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    font-size: 1.25rem;
     cursor: pointer;
     z-index: 60;
-    box-shadow: 0 4px 16px rgba(0,0,0,.5);
-    transition: transform .15s, border-color .15s;
-    display: flex; align-items: center; justify-content: center;
+    box-shadow: var(--shadow-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s, border-color 0.1s;
   }
-  .tray-fab:hover, .tray-fab.open { border-color: var(--gold-dim); transform: scale(1.06); }
+  .fab:hover, .fab.fab-open {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
 
   .tray-backdrop { position: fixed; inset: 0; z-index: 58; }
 
   .tray {
     position: fixed;
-    bottom: 5.5rem;
-    right: 1.5rem;
-    width: 290px;
+    bottom: 4.5rem;
+    right: 1.25rem;
+    width: 280px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 4px 24px rgba(0,0,0,.6);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
     z-index: 59;
-    padding: .7rem;
-    display: flex; flex-direction: column; gap: .55rem;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
   }
 
-  .tray-header { display: flex; align-items: center; justify-content: space-between; }
-  .tray-title {
-    font-family: var(--font-heading);
-    font-size: .88rem;
-    font-weight: 700;
-    color: var(--gold);
-    letter-spacing: .06em;
+  .tray-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
+  .tray-title { font-size: 0.875rem; font-weight: 600; }
 
-  .dice-row { display: flex; gap: .3rem; flex-wrap: wrap; }
+  .dice-row { display: flex; gap: 0.25rem; flex-wrap: wrap; }
   .die-btn {
     background: var(--surface-2);
-    border: 1px solid var(--border-muted);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text);
-    font-family: var(--font-heading);
-    font-size: .75rem;
-    font-weight: 700;
-    letter-spacing: .04em;
-    padding: .28rem .5rem;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 0.25rem 0.5rem;
     cursor: pointer;
-    transition: border-color .1s, color .1s;
+    transition: all 0.1s;
   }
-  .die-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
+  .die-btn:hover { border-color: var(--border-strong); background: var(--surface); }
 
-  .formula-row { display: flex; gap: .3rem; }
+  .formula-row { display: flex; gap: 0.25rem; }
   .formula-input {
     flex: 1;
-    background: var(--bg-2);
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius);
-    color: var(--text);
-    padding: .32rem .55rem;
-    font-family: 'Courier New', monospace;
-    font-size: .88rem;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.875rem;
+    padding: 0.3rem 0.5rem;
   }
-  .formula-input:focus { outline: none; border-color: var(--gold-dim); }
+  .formula-input:focus { outline: none; border-color: var(--border-strong); }
 
-  .options-row { display: flex; gap: .4rem; }
-  .options-row label {
-    display: flex; align-items: center; gap: .2rem;
-    font-family: var(--font-heading); font-size: .68rem; letter-spacing: .06em;
-    color: var(--text-muted); cursor: pointer;
-    padding: 2px 7px; border-radius: 999px;
-    border: 1px solid var(--border-muted); transition: all .1s;
+  .opts-row { display: flex; gap: 0.25rem; }
+  .opt-btn {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.1s;
   }
-  .options-row label.active { border-color: var(--gold-dim); color: var(--gold); }
-  .options-row input { display: none; }
+  .opt-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
   .last-result {
     background: var(--surface-2);
-    border: 1px solid var(--border-muted);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: .38rem .55rem;
-    display: flex; align-items: center; gap: .45rem;
+    padding: 0.375rem 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
-  .result-formula { font-family: var(--font-body); font-size: .78rem; color: var(--text-muted); }
-  .result-detail  { font-family: var(--font-body); font-size: .82rem; color: var(--text); flex: 1; }
-  .result-total   { font-family: var(--font-heading); font-size: 1.15rem; font-weight: 800; color: var(--gold); min-width: 2em; text-align: right; }
+  .res-formula { font-size: 0.75rem; color: var(--text-muted); flex: 0 0 auto; }
+  .res-detail  { font-size: 0.8125rem; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .res-total   { font-size: 1.125rem; font-weight: 800; color: var(--text); min-width: 2em; text-align: right; }
 </style>

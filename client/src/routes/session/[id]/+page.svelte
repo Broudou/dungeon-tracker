@@ -3,7 +3,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { combat, setCombat, pendingActions, currentCombatant } from '$lib/stores/combat';
-  import { session, roster, identity, worldFeed, worldRolls } from '$lib/stores/session';
+  import { session, roster, identity, worldRolls } from '$lib/stores/session';
   import { connectSocket, disconnectSocket, getSocket } from '$lib/socket';
 
   import InitiativeTracker  from '$lib/components/combat/InitiativeTracker.svelte';
@@ -11,76 +11,72 @@
   import ActionPanel        from '$lib/components/combat/ActionPanel.svelte';
   import ValidationQueue    from '$lib/components/combat/ValidationQueue.svelte';
   import CombatSetup        from '$lib/components/combat/CombatSetup.svelte';
-  import LoreCardPublisher  from '$lib/components/world/LoreCardPublisher.svelte';
-  import LoreCardFeed       from '$lib/components/world/LoreCardFeed.svelte';
   import SkillCheckPanel    from '$lib/components/world/SkillCheckPanel.svelte';
   import DiceTray           from '$lib/components/dice/DiceTray.svelte';
   import HpBar              from '$lib/components/ui/HpBar.svelte';
 
   const sessionId = $page.params.id;
 
-  let loading  = true;
-  let error    = '';
-  let activeTab = 'combat';
-  let diceTrayOpen = false;
-
-  let sessionData  = null;
-  let campaignData = null;
-
-  let showStartModal = false;
-  let monsterList    = [];
-
-  let myCharId    = null;
-  let myCharObj   = null;
-  let displayName = '';
+  let loading       = true;
+  let error         = '';
+  let activeTab     = 'combat';
+  let diceTrayOpen  = false;
+  let sessionData   = null;
+  let campaignData  = null;
+  let showStartModal= false;
+  let monsterList   = [];
+  let myCharId      = null;
+  let displayName   = '';
   let worldRollFeed = [];
-  let toast = '';
+  let toast         = '';
 
+  // HP edit modal
   let editingPlayer = null;
-  let editForm = {};
-  let editSaving = false;
+  let editForm      = {};
+  let editSaving    = false;
 
-  $: isDM = !!$auth?.user;
-  $: phase = sessionData?.phase ?? 'open-world';
-  $: myCharObj = campaignData?.players?.find(p => p._id === myCharId) || null;
+  $: isDM    = !!$auth?.user;
+  $: phase   = sessionData?.phase ?? 'open-world';
+  $: myCharObj = campaignData?.players?.find(p => p._id === myCharId) ?? null;
+
+  function getJwtFromCookie() {
+    if (typeof document === 'undefined') return '';
+    const m = document.cookie.match(/(?:^|;\s*)token=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
 
   onMount(async () => {
+    // Restore player identity from sessionStorage
     if (typeof window !== 'undefined') {
-      const stored = sessionStorage.getItem(`session_${sessionId}`);
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          myCharId    = parsed.characterId || null;
-          displayName = parsed.displayName || '';
-        } catch { /* ignore */ }
-      }
+      try {
+        const stored = sessionStorage.getItem(`session_${sessionId}`);
+        if (stored) { const p = JSON.parse(stored); myCharId = p.characterId || null; displayName = p.displayName || ''; }
+      } catch { /* ignore */ }
     }
 
+    // Load session
     try {
       const res = await fetch(`/api/sessions/${sessionId}`, { credentials: 'include' });
       if (!res.ok) throw new Error((await res.json()).message);
       sessionData = await res.json();
       session.set(sessionData);
-    } catch (e) {
-      error = e.message;
-      loading = false;
-      return;
-    }
+    } catch (e) { error = e.message; loading = false; return; }
 
+    // Load campaign (non-fatal)
     try {
       const res = await fetch(`/api/campaigns/${sessionData.campaignId}`, { credentials: 'include' });
       if (res.ok) campaignData = await res.json();
     } catch { /* non-fatal */ }
 
+    // Load monster list for DM combat setup (non-fatal)
     if (isDM) {
       try {
-        const mRes = await fetch('/api/monsters?limit=500', { credentials: 'include' });
-        if (mRes.ok) monsterList = await mRes.json();
-      } catch { /* non-fatal — CombatSetup falls back to local data */ }
+        const res = await fetch('/api/monsters?limit=500', { credentials: 'include' });
+        if (res.ok) monsterList = await res.json();
+      } catch { /* non-fatal — CombatSetup uses local data fallback */ }
     }
 
-    // Read the cookie directly — $auth may still be loading at this point
-    // so the isDM reactive variable cannot be trusted here.
+    // Connect socket
     const token = getJwtFromCookie();
     const authPayload = token
       ? { token, sessionId }
@@ -88,12 +84,11 @@
 
     const socket = connectSocket(sessionId, authPayload);
 
-    socket.on('session:role',         (data) => identity.set(data));
-    socket.on('session:roster',       (r)    => roster.set(r));
-    socket.on('session:phase',        (p)    => { if (sessionData) sessionData.phase = p; sessionData = sessionData; });
+    socket.on('session:role',   data  => identity.set(data));
+    socket.on('session:roster', r     => roster.set(r));
+    socket.on('session:phase',  p     => { if (sessionData) { sessionData.phase = p; sessionData = sessionData; }});
 
-    socket.on('combat:state',         (s)    => setCombat(s));
-    socket.on('combat:actionPending', ()     => { /* handled via store */ });
+    socket.on('combat:state',           s  => setCombat(s));
     socket.on('combat:actionResolved', ({ status, reason }) => {
       if (status === 'rejected' && reason) {
         toast = `Action rejected: ${reason}`;
@@ -101,42 +96,32 @@
       }
     });
 
-    socket.on('world:loreFeed',       (cards) => worldFeed.set(cards));
-    socket.on('world:loreCard',       (card)  => worldFeed.update(f => [...f, card]));
-    socket.on('world:roll',           (r)     => worldRollFeed = [...worldRollFeed.slice(-50), r]);
+    socket.on('world:roll', r => { worldRollFeed = [...worldRollFeed.slice(-50), r]; });
 
-    socket.on('player:updated', ({ playerId, combat, conditions }) => {
+    socket.on('player:updated', ({ playerId, combat: c, conditions }) => {
       if (campaignData) {
         campaignData = {
           ...campaignData,
-          players: campaignData.players.map(p =>
-            p._id === playerId ? { ...p, combat, conditions } : p
-          ),
+          players: campaignData.players.map(p => p._id === playerId ? { ...p, combat: c, conditions } : p),
         };
       }
     });
 
     socket.emit('combat:getState');
-
     loading = false;
   });
 
   onDestroy(() => disconnectSocket());
 
-  function getJwtFromCookie() {
-    if (typeof document === 'undefined') return '';
-    const match = document.cookie.match(/(?:^|;\s*)token=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
-  }
-
+  // ── HP edit modal ────────────────────────────────────────────────────────────
   function openEdit(player) {
     editingPlayer = player;
     editForm = {
-      hpCurrent:    player.combat?.hpCurrent    ?? 0,
-      hpMax:        player.combat?.hpMax        ?? 0,
-      AC:           player.combat?.AC           ?? 10,
-      speed:        player.combat?.speed        ?? 30,
-      initiativeMod:player.combat?.initiativeMod ?? 0,
+      hpCurrent:     player.combat?.hpCurrent    ?? 0,
+      hpMax:         player.combat?.hpMax        ?? 0,
+      AC:            player.combat?.AC           ?? 10,
+      speed:         player.combat?.speed        ?? 30,
+      initiativeMod: player.combat?.initiativeMod ?? 0,
     };
   }
 
@@ -149,19 +134,12 @@
       if (isDM) {
         const res = await fetch(
           `/api/campaigns/${sessionData.campaignId}/players/${editingPlayer._id}`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ combat: { ...editingPlayer.combat, ...editForm } }),
-          }
+          { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ combat: { ...editingPlayer.combat, ...editForm } }) }
         );
         if (res.ok) {
           const updated = await res.json();
-          campaignData = {
-            ...campaignData,
-            players: campaignData.players.map(p => p._id === updated._id ? { ...p, ...updated } : p),
-          };
+          campaignData = { ...campaignData, players: campaignData.players.map(p => p._id === updated._id ? { ...p, ...updated } : p) };
         }
       } else {
         getSocket()?.emit('player:updateSelf', { hpCurrent: Number(editForm.hpCurrent) });
@@ -171,6 +149,7 @@
     closeEdit();
   }
 
+  // ── Combat control ───────────────────────────────────────────────────────────
   function handleCombatStart(e) {
     const { playerIds, monsters } = e.detail;
     getSocket()?.emit('combat:start', { playerIds, monsters, customIds: [] });
@@ -186,87 +165,82 @@
   <title>{campaignData?.name ?? 'Session'} — Dungeon Tracker</title>
 </svelte:head>
 
+<!-- Toast notification -->
 {#if toast}
-  <div class="toast">{toast}</div>
+  <div class="toast" role="alert">{toast}</div>
 {/if}
 
 {#if loading}
-  <div class="loading" style="padding:4rem; text-align:center;">Loading session</div>
+  <div class="loading" style="padding: 4rem; text-align: center;">Loading session…</div>
+
 {:else if error}
   <div class="page"><div class="container"><div class="alert alert-error">{error}</div></div></div>
+
 {:else}
 
-<!-- Session nav bar -->
-<div class="session-nav">
-  <div class="session-nav-left">
-    <span class="session-brand">{campaignData?.name ?? 'Session'}</span>
+<!-- Session top bar -->
+<div class="session-bar">
+  <div class="session-bar-left">
+    <span class="session-name">{campaignData?.name ?? 'Session'}</span>
     <span class="session-key">{sessionData.joinKey}</span>
     <span class="phase-badge phase-{phase}">
       {phase === 'combat' ? 'Combat' : 'World'}
     </span>
   </div>
-  <div class="session-nav-right">
-    <span class="roster-count">{$roster.length} connected</span>
+  <div class="session-bar-right">
+    <span class="text-muted text-sm">{$roster.length} connected</span>
     {#if isDM && phase !== 'combat'}
       <a href="/campaign/{sessionData.campaignId}" class="btn btn-ghost btn-sm">Edit Campaign</a>
+    {/if}
+    {#if isDM && phase === 'combat' && $combat?.state === 'active'}
+      <button class="btn btn-danger btn-sm" on:click={endCombat}>End Combat</button>
     {/if}
   </div>
 </div>
 
 <!-- Tab bar -->
-<div class="session-tabs">
-  <button class="tab-btn" class:active={activeTab==='combat'} on:click={() => activeTab='combat'}>
-    Combat
-  </button>
-  <button class="tab-btn" class:active={activeTab==='world'} on:click={() => activeTab='world'}>
-    World
-  </button>
-  <button class="tab-btn" class:active={activeTab==='characters'} on:click={() => activeTab='characters'}>
-    Characters
-  </button>
-  {#if isDM}
-    <button class="tab-btn" class:active={activeTab==='lore'} on:click={() => activeTab='lore'}>
-      Lore
-    </button>
-  {/if}
+<div class="tabs" style="padding: 0 1.25rem; margin-bottom: 0;">
+  <button class="tab-btn" class:active={activeTab==='combat'}     on:click={() => activeTab='combat'}>Combat</button>
+  <button class="tab-btn" class:active={activeTab==='characters'} on:click={() => activeTab='characters'}>Characters</button>
 </div>
 
-<!-- ════════════════════════════════════════════════════════ COMBAT TAB -->
+<!-- ══════════════════════════════════════════════ COMBAT TAB ══ -->
 {#if activeTab === 'combat'}
   <div class="combat-layout">
 
-    <!-- Zone A: monsters (top rail) -->
+    <!-- Monster rail (top, active combat only) -->
     {#if $combat?.state === 'active'}
       {@const monsters = $combat.initiativeOrder.filter(c => c.entityType !== 'player')}
       {#if monsters.length}
         <div class="monster-rail">
           {#each monsters as c (c.instanceId)}
             <div class="monster-card" class:defeated={c.isDefeated}>
-              <div class="mc-header">
+              <div class="mc-head">
                 <span class="mc-name">{c.name}</span>
-                {#if c.cr}<span class="badge badge-gold" style="font-size:0.6rem;">CR {c.cr}</span>{/if}
+                {#if c.cr}<span class="badge">CR {c.cr}</span>{/if}
               </div>
               <HpBar current={c.currentHp} max={c.maxHp} />
-              <div class="mc-stats">AC {c.ac}</div>
+              <div class="mc-sub text-xs text-muted">AC {c.ac} · {c.currentHp}/{c.maxHp} HP</div>
               {#if c.conditions.length}
-                <div class="mc-pills">
-                  {#each c.conditions as cond}
-                    <span class="pill pill-red">{cond}</span>
-                  {/each}
+                <div class="pill-row-sm">
+                  {#each c.conditions as cond}<span class="pill pill-red">{cond}</span>{/each}
                 </div>
               {/if}
-              {#each c.customTags as tag}
-                <span class="pill pill-{tag.color}">{tag.label}</span>
-              {/each}
+              {#if c.customTags.length}
+                <div class="pill-row-sm">
+                  {#each c.customTags as tag}<span class="pill pill-{tag.color}">{tag.label}</span>{/each}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
       {/if}
     {/if}
 
-    <!-- Zone B: battle engine (middle) -->
+    <!-- Main combat area -->
     <div class="battle-engine">
-      <!-- Left: initiative tracker -->
+
+      <!-- Left: initiative tracker + party sidebar -->
       <div class="engine-left">
         {#if $combat?.state === 'active'}
           <InitiativeTracker
@@ -276,813 +250,587 @@
             {isDM}
             {myCharId}
           />
+
+          <!-- Party sidebar (HP quick view) -->
           {#if campaignData?.players?.length}
             <div class="party-sidebar">
-              <p class="party-sidebar-label">Party</p>
+              <p class="sidebar-label">Party</p>
               {#each campaignData.players as p (p._id)}
                 {@const isMe = p._id === myCharId}
-                <div class="party-sidebar-row" class:sidebar-mine={isMe}>
-                  <span class="party-sidebar-av">{p.name.slice(0,2).toUpperCase()}</span>
-                  <div class="party-sidebar-info">
-                    <span class="party-sidebar-name">{p.name}</span>
-                    <span class="party-sidebar-hp">HP {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0} · AC {p.combat?.AC ?? 10}</span>
+                <div class="sidebar-row" class:sidebar-mine={isMe}>
+                  <span class="sidebar-av" aria-hidden="true">{p.name.slice(0,2).toUpperCase()}</span>
+                  <div class="sidebar-info">
+                    <span class="sidebar-name">{p.name}</span>
+                    <span class="sidebar-hp text-xs text-muted">HP {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0} · AC {p.combat?.AC ?? 10}</span>
                   </div>
                   {#if isDM || isMe}
-                    <button class="party-sidebar-edit" on:click={() => openEdit(p)} title="Edit">✎</button>
+                    <button class="edit-btn" on:click={() => openEdit(p)} title="Edit HP" aria-label="Edit HP">✎</button>
                   {/if}
                 </div>
               {/each}
             </div>
           {/if}
-        {:else if isDM}
-          <div class="idle-combat">
-            {#if campaignData?.players?.length}
-              <p style="font-family:var(--font-heading); font-size:0.68rem; letter-spacing:0.1em;
-                text-transform:uppercase; color:var(--gold); margin-bottom:0.6rem;">
-                Party Roster
-              </p>
-              <div class="roster-grid">
-                {#each campaignData.players as p (p._id)}
-                  <div class="roster-card">
-                    <div class="roster-avatar">{p.name.slice(0,2).toUpperCase()}</div>
-                    <div class="roster-name">{p.name}</div>
-                    <div class="roster-meta">Lv {p.level} {p.class}</div>
-                    <div class="roster-hp">
-                      <span style="color:var(--text-muted); font-size:0.65rem;">HP</span>
-                      {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0}
-                    </div>
-                    <div class="roster-hp">
-                      <span style="color:var(--text-muted); font-size:0.65rem;">AC</span>
-                      {p.combat?.AC ?? 10}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            <button class="btn btn-primary" style="margin-top:1rem;" on:click={() => showStartModal = true}>
-              Begin Encounter
-            </button>
-          </div>
+
         {:else}
-          <div class="idle-combat">
+          <!-- Idle state — party roster cards + begin button -->
+          <div class="idle-state">
             {#if campaignData?.players?.length}
-              <p style="font-family:var(--font-heading); font-size:0.68rem; letter-spacing:0.1em;
-                text-transform:uppercase; color:var(--gold); margin-bottom:0.6rem;">
-                Party Roster
-              </p>
+              <p class="idle-label">Party Roster</p>
               <div class="roster-grid">
                 {#each campaignData.players as p (p._id)}
                   {@const isMe = p._id === myCharId}
                   <div class="roster-card" class:roster-mine={isMe}>
-                    <div class="roster-avatar">{p.name.slice(0,2).toUpperCase()}</div>
+                    <div class="roster-av">{p.name.slice(0,2).toUpperCase()}</div>
                     <div class="roster-name">{p.name}</div>
-                    <div class="roster-meta">Lv {p.level} {p.class}</div>
-                    <div class="roster-hp">
-                      <span style="color:var(--text-muted); font-size:0.65rem;">HP</span>
-                      {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0}
+                    <div class="roster-meta text-xs text-muted">Lv {p.level} {p.class}</div>
+                    <div class="roster-stat text-xs">
+                      <span class="text-faint">HP</span> {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0}
+                    </div>
+                    <div class="roster-stat text-xs">
+                      <span class="text-faint">AC</span> {p.combat?.AC ?? 10}
                     </div>
                   </div>
                 {/each}
               </div>
             {/if}
-            <p class="text-muted" style="font-family:var(--font-body); font-style:italic; margin-top:1rem; font-size:0.85rem;">
-              Awaiting the Dungeon Master to call for arms…
-            </p>
-          </div>
-        {/if}
 
-        {#if isDM && $combat?.state === 'active'}
-          <div class="rest-controls">
-            <button class="btn btn-ghost btn-sm" on:click={endCombat}>End Combat</button>
+            {#if isDM}
+              <button class="btn btn-primary" style="margin-top: 1rem;" on:click={() => showStartModal = true}>
+                Begin Encounter
+              </button>
+            {:else}
+              <p class="text-muted text-sm" style="margin-top: 1rem; font-style: italic;">
+                Awaiting the Dungeon Master to begin combat…
+              </p>
+            {/if}
           </div>
         {/if}
       </div>
 
-      <!-- Right: combat log + action panel -->
-      <div class="engine-right">
-        <div class="log-area">
-          <CombatLog entries={$combat?.combatLog ?? []} {isDM} />
+      <!-- Right: action panel + combat log -->
+      {#if $combat?.state === 'active'}
+        <div class="engine-right">
+          <div class="action-section">
+            <p class="section-heading">Actions</p>
+            <ActionPanel
+              currentCombatant={$currentCombatant}
+              {myCharId}
+              {isDM}
+              campaign={campaignData}
+              sessionId={sessionId}
+              combatants={$combat?.initiativeOrder ?? []}
+            />
+          </div>
+          <div class="log-section">
+            <p class="section-heading">Combat Log</p>
+            <CombatLog entries={$combat?.combatLog ?? []} {isDM} />
+          </div>
         </div>
-        <div class="action-area">
-          <ActionPanel
-            currentCombatant={$currentCombatant}
-            {myCharId}
-            {isDM}
-            campaign={campaignData}
-            {sessionId}
-            combatants={$combat?.initiativeOrder ?? []}
-          />
-        </div>
-      </div>
+      {/if}
+
     </div>
 
-    <!-- Zone C: player characters (bottom rail) -->
-    {#if $combat?.state === 'active'}
-      {@const players = $combat.initiativeOrder.filter(c => c.entityType === 'player')}
-      {#if players.length}
-        <div class="player-rail">
-          {#each players as c (c.instanceId)}
-            {@const isActive = $combat.currentTurnIndex === $combat.initiativeOrder.findIndex(x => x.instanceId === c.instanceId)}
-            {@const isMe     = c.entityId === myCharId}
-            <div class="player-card" class:active={isActive} class:mine={isMe} class:unconscious={c.currentHp === 0}>
-              {#if c.currentHp === 0}
-                <div class="unconscious-overlay">FALLEN</div>
-              {/if}
-              <div class="pc-header">
-                <span class="pc-name">{c.name}</span>
-                <span class="pc-meta">{c.class} Lv{c.level}</span>
+    <!-- DM Validation Queue (fixed, bottom-left) -->
+    {#if isDM}
+      <ValidationQueue actions={$pendingActions} />
+    {/if}
+  </div>
+{/if}
+
+<!-- ══════════════════════════════════════════════ CHARACTERS TAB ══ -->
+{#if activeTab === 'characters'}
+  <div class="page-pad">
+    <div class="container">
+      {#if !campaignData?.players?.length}
+        <div class="empty-card">No characters in this campaign.</div>
+      {:else}
+        <div class="char-grid">
+          {#each campaignData.players as p (p._id)}
+            {@const isMe = p._id === myCharId}
+            <div class="char-card" class:char-mine={isMe}>
+              <div class="char-head">
+                <div class="char-av">{p.name.slice(0,2).toUpperCase()}</div>
+                <div>
+                  <div class="char-name">{p.name} {#if isMe}<span class="badge">You</span>{/if}</div>
+                  <div class="char-meta text-sm text-muted">Lv {p.level} {p.race} {p.class}</div>
+                </div>
+                {#if isDM || isMe}
+                  <button class="btn btn-secondary btn-sm" style="margin-left: auto;" on:click={() => openEdit(p)}>
+                    Edit HP
+                  </button>
+                {/if}
               </div>
-              <HpBar current={c.currentHp} max={c.maxHp} />
-              <div class="pc-stats">
-                <span>AC {c.ac}</span>
-                <span>Init {c.initiative >= 0 ? '+' : ''}{c.initiative}</span>
-              </div>
-              {#if c.conditions.length}
-                <div class="mc-pills">
-                  {#each c.conditions as cond}
-                    <span class="pill pill-red">{cond}</span>
+
+              <!-- Ability scores -->
+              {#if p.stats}
+                <div class="stat-row">
+                  {#each ['STR','DEX','CON','INT','WIS','CHA'] as s}
+                    {@const val = p.stats[s] ?? 10}
+                    {@const mod = Math.floor((val - 10) / 2)}
+                    <div class="stat-box">
+                      <span class="stat-label">{s}</span>
+                      <span class="stat-val">{val}</span>
+                      <span class="stat-mod text-xs text-muted">{mod >= 0 ? '+' : ''}{mod}</span>
+                    </div>
                   {/each}
                 </div>
               {/if}
-              <div class="resource-pips">
-                <span class="res-pip" class:spent={c.actionSpent} title="Action">A</span>
-                <span class="res-pip" class:spent={c.bonusActionSpent} title="Bonus Action">B</span>
-                <span class="res-pip" class:spent={c.reactionSpent} title="Reaction">R</span>
+
+              <!-- Combat stats -->
+              <div class="combat-stats">
+                <div class="cstat">
+                  <span class="cstat-label">HP</span>
+                  <span class="cstat-val">{p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0}</span>
+                </div>
+                <div class="cstat">
+                  <span class="cstat-label">AC</span>
+                  <span class="cstat-val">{p.combat?.AC ?? 10}</span>
+                </div>
+                <div class="cstat">
+                  <span class="cstat-label">Speed</span>
+                  <span class="cstat-val">{p.combat?.speed ?? 30}ft</span>
+                </div>
+                <div class="cstat">
+                  <span class="cstat-label">Init</span>
+                  <span class="cstat-val">{p.combat?.initiativeMod >= 0 ? '+' : ''}{p.combat?.initiativeMod ?? 0}</span>
+                </div>
               </div>
+
+              <HpBar current={p.combat?.hpCurrent ?? 0} max={p.combat?.hpMax ?? 1} />
             </div>
           {/each}
         </div>
       {/if}
-    {/if}
+    </div>
   </div>
-
-  {#if isDM}
-    <ValidationQueue actions={$pendingActions} />
-  {/if}
-
-<!-- ════════════════════════════════════════════════════════ WORLD TAB -->
-{:else if activeTab === 'world'}
-  <div class="world-layout">
-    {#if isDM}
-      <div class="world-dm-col">
-        <LoreCardPublisher campaignId={sessionData.campaignId} />
-
-        <div class="card" style="margin-top:1rem;">
-          <div class="card-header"><span class="card-title">Session Feed</span></div>
-          {#if $worldFeed.length === 0}
-            <p class="text-muted text-sm" style="font-style:italic;">No cards pushed yet.</p>
-          {:else}
-            {#each [...$worldFeed].reverse() as card}
-              <div class="feed-history-item">
-                <span class="badge">{card.category}</span>
-                <span style="font-size:0.88rem; flex:1;">{card.title}</span>
-                <button class="btn btn-ghost btn-sm" on:click={() => getSocket()?.emit('world:pushLore', card)}>
-                  Re-push
-                </button>
-              </div>
-            {/each}
-          {/if}
-        </div>
-      </div>
-
-      <div class="world-player-col">
-        <LoreCardFeed cards={$worldFeed} />
-        {#if worldRollFeed.length}
-          <div class="roll-feed card">
-            <div class="card-header"><span class="card-title">Roll Feed</span></div>
-            {#each [...worldRollFeed].reverse().slice(0, 15) as r}
-              <p class="roll-line">{r.message}</p>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {:else}
-      <div class="world-player-col" style="max-width:680px; margin:0 auto;">
-        <LoreCardFeed cards={$worldFeed} />
-        {#if myCharObj}
-          <div class="card">
-            <div class="card-header"><span class="card-title">Skill Checks</span></div>
-            <SkillCheckPanel character={myCharObj} />
-            {#if worldRollFeed.length}
-              <div style="margin-top:1rem; border-top:1px solid var(--border-muted); padding-top:.75rem;">
-                {#each [...worldRollFeed].reverse().slice(0, 10) as r}
-                  <p class="roll-line">{r.message}</p>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </div>
-
-<!-- ════════════════════════════════════════════════════════ CHARACTERS TAB -->
-{:else if activeTab === 'characters'}
-  <div class="page"><div class="container">
-    {#if campaignData?.players?.length}
-      <div class="char-grid">
-        {#each campaignData.players as player}
-          {@const canEdit = isDM || player._id === myCharId}
-          <div class="char-sheet card">
-            <div class="char-sheet-header">
-              <div>
-                <h2 style="font-size:1.1rem;">{player.name}</h2>
-                <p class="text-muted text-sm" style="font-family:var(--font-body); font-style:italic;">
-                  {player.race} {player.class} · Level {player.level}
-                </p>
-              </div>
-              {#if canEdit}
-                <button class="btn btn-ghost btn-sm" on:click={() => openEdit(player)}>Edit</button>
-              {/if}
-            </div>
-
-              <div class="ability-grid">
-                {#each ['STR','DEX','CON','INT','WIS','CHA'] as ab}
-                  {@const score = player.stats?.[ab] ?? 10}
-                  {@const mod   = Math.floor((score - 10) / 2)}
-                  <div class="ability-block">
-                    <span class="ability-mod">{mod >= 0 ? '+' : ''}{mod}</span>
-                    <span class="ability-score">{score}</span>
-                    <span class="ability-label">{ab}</span>
-                  </div>
-                {/each}
-              </div>
-
-              <div class="stat-row">
-                <div class="stat-block">
-                  <span class="stat-val">{player.combat?.hpCurrent ?? 0}/{player.combat?.hpMax ?? 0}</span>
-                  <span class="stat-label">HP</span>
-                </div>
-                <div class="stat-block">
-                  <span class="stat-val">{player.combat?.AC ?? 10}</span>
-                  <span class="stat-label">AC</span>
-                </div>
-                <div class="stat-block">
-                  <span class="stat-val">{player.combat?.speed ?? 30}</span>
-                  <span class="stat-label">Speed</span>
-                </div>
-                <div class="stat-block">
-                  <span class="stat-val">{player.combat?.initiativeMod >= 0 ? '+' : ''}{player.combat?.initiativeMod ?? 0}</span>
-                  <span class="stat-label">Init</span>
-                </div>
-              </div>
-
-              {#if player.conditions?.length}
-                <div class="mc-pills" style="margin-top:.5rem">
-                  {#each player.conditions as cond}
-                    <span class="pill pill-red">{cond}</span>
-                  {/each}
-                </div>
-              {/if}
-
-              {#if player.inventory?.length}
-                <details style="margin-top:.75rem">
-                  <summary class="text-sm" style="cursor:pointer; color:var(--text-muted); font-family:var(--font-heading); font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase;">
-                    Inventory ({player.inventory.length})
-                  </summary>
-                  <table class="inv-table">
-                    <thead><tr><th>Item</th><th>Qty</th><th>Weight</th></tr></thead>
-                    <tbody>
-                      {#each player.inventory as item}
-                        <tr>
-                          <td title={item.description}>{item.name}</td>
-                          <td>{item.quantity}</td>
-                          <td>{item.weight ?? '—'}</td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </details>
-              {/if}
-            </div>
-        {/each}
-      </div>
-    {:else}
-      <p class="text-muted" style="padding:2rem; font-family:var(--font-body); font-style:italic;">
-        No characters in this campaign.
-      </p>
-    {/if}
-  </div></div>
-
-<!-- ════════════════════════════════════════════════════════ LORE TAB -->
-{:else if activeTab === 'lore' && isDM}
-  <div class="page"><div class="container">
-    {#if campaignData?.lore?.length}
-      <div style="display:flex; flex-direction:column; gap:.75rem;">
-        {#each campaignData.lore as entry}
-          <div class="card">
-            <div class="flex-between">
-              <div class="flex-center gap-1">
-                <strong style="font-family:var(--font-heading);">{entry.title}</strong>
-                <span class="badge">{entry.category}</span>
-                {#if entry.visibleToPlayers}
-                  <span class="badge badge-green">public</span>
-                {/if}
-              </div>
-              <button class="btn btn-secondary btn-sm"
-                on:click={() => getSocket()?.emit('world:pushLore', { title: entry.title, category: entry.category, content: entry.body })}>
-                Push to Players
-              </button>
-            </div>
-            {#if entry.body}
-              <p class="text-muted text-sm" style="margin-top:.5rem; font-family:var(--font-body); font-style:italic; line-height:1.6; white-space:pre-wrap;">
-                {entry.body.length > 300 ? entry.body.slice(0,300) + '…' : entry.body}
-              </p>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    {:else}
-      <p class="text-muted" style="padding:2rem; font-family:var(--font-body); font-style:italic;">
-        No lore entries yet. Add them in the Campaign editor.
-      </p>
-    {/if}
-  </div></div>
 {/if}
 
-{/if}<!-- end if !loading -->
-
-<!-- Dice tray -->
-<DiceTray bind:open={diceTrayOpen} />
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 
 <!-- Combat Setup Modal -->
 {#if showStartModal}
-  <CombatSetup
-    players={campaignData?.players ?? []}
-    {monsterList}
-    on:start={handleCombatStart}
-    on:close={() => showStartModal = false}
-  />
+  <div class="modal-backdrop" on:click|self={() => showStartModal = false} role="presentation">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Combat Setup">
+      <CombatSetup
+        players={campaignData?.players ?? []}
+        {monsterList}
+        on:start={handleCombatStart}
+      />
+      <button class="btn btn-ghost btn-sm" style="margin-top: 1rem;" on:click={() => showStartModal = false}>
+        Cancel
+      </button>
+    </div>
+  </div>
 {/if}
 
+<!-- HP Edit Modal -->
 {#if editingPlayer}
-  <div class="edit-overlay" on:click|self={closeEdit}>
-    <div class="edit-modal card">
-      <div class="edit-modal-header">
-        <h3 style="font-family:var(--font-heading); font-size:1rem; margin:0; color:var(--gold);">
-          {editingPlayer.name}
-        </h3>
-        <button class="btn btn-ghost btn-sm" on:click={closeEdit}>✕</button>
-      </div>
-      <div class="edit-modal-body">
-        <div class="edit-field">
-          <label>HP Current</label>
-          <input type="number" bind:value={editForm.hpCurrent} min="0" />
-        </div>
+  <div class="modal-backdrop" on:click|self={closeEdit} role="presentation">
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-label="Edit HP">
+      <h3 class="modal-title">Edit — {editingPlayer.name}</h3>
+      <div class="grid-2">
+        <div class="field"><label>HP Current</label><input type="number" bind:value={editForm.hpCurrent} /></div>
+        <div class="field"><label>HP Max</label><input type="number" bind:value={editForm.hpMax} /></div>
         {#if isDM}
-          <div class="edit-field">
-            <label>HP Max</label>
-            <input type="number" bind:value={editForm.hpMax} min="0" />
-          </div>
-          <div class="edit-field">
-            <label>AC</label>
-            <input type="number" bind:value={editForm.AC} min="1" />
-          </div>
-          <div class="edit-field">
-            <label>Speed (ft)</label>
-            <input type="number" bind:value={editForm.speed} min="0" />
-          </div>
-          <div class="edit-field">
-            <label>Initiative Modifier</label>
-            <input type="number" bind:value={editForm.initiativeMod} />
-          </div>
+          <div class="field"><label>AC</label><input type="number" bind:value={editForm.AC} /></div>
+          <div class="field"><label>Speed (ft)</label><input type="number" bind:value={editForm.speed} /></div>
+          <div class="field"><label>Initiative Mod</label><input type="number" bind:value={editForm.initiativeMod} /></div>
         {/if}
       </div>
-      <div class="edit-modal-footer">
-        <button class="btn btn-ghost btn-sm" on:click={closeEdit}>Cancel</button>
-        <button class="btn btn-primary btn-sm" on:click={saveEdit} disabled={editSaving}>
+      <div class="flex-center gap-sm" style="margin-top: 0.875rem;">
+        <button class="btn btn-primary" on:click={saveEdit} disabled={editSaving}>
           {editSaving ? 'Saving…' : 'Save'}
         </button>
+        <button class="btn btn-ghost" on:click={closeEdit}>Cancel</button>
       </div>
     </div>
   </div>
 {/if}
 
+<!-- Dice Tray (floating, always accessible) -->
+<DiceTray bind:open={diceTrayOpen} />
+
+{/if}
+
 <style>
-  /* ── Session nav ──────────────────────────────────────────────────────── */
-  .session-nav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: .45rem 1rem;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    gap: 1rem;
-    height: 46px;
-  }
-  .session-nav-left { display: flex; align-items: center; gap: .75rem; }
-  .session-nav-right { display: flex; align-items: center; gap: .75rem; }
-
-  .session-brand {
-    font-family: var(--font-heading);
-    font-size: .9rem;
-    font-weight: 700;
-    color: var(--gold);
-    letter-spacing: .05em;
-  }
-  .session-key {
-    font-family: var(--font-heading);
-    font-size: .72rem;
-    letter-spacing: .2em;
-    color: var(--text-muted);
-    background: var(--surface-2);
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius);
-    padding: .1rem .4rem;
-  }
-  .phase-badge {
-    font-family: var(--font-heading);
-    font-size: .68rem;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    padding: .15rem .55rem;
-    border-radius: 999px;
-    border: 1px solid var(--border-muted);
-  }
-  .phase-combat { border-color: var(--crimson); color: #e89090; background: rgba(139,26,26,0.2); }
-  .phase-open-world { border-color: var(--gold-dim); color: var(--gold); background: rgba(124,106,62,0.15); }
-
-  .roster-count {
-    font-family: var(--font-heading);
-    font-size: .7rem;
-    letter-spacing: .05em;
-    color: var(--text-muted);
-  }
-  .roster-count::before { content: '⬤ '; color: var(--success); font-size: .6rem; }
-
-  /* ── Session tabs ─────────────────────────────────────────────────────── */
-  .session-tabs {
-    display: flex;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border-muted);
-    padding: 0 .5rem;
-    gap: .25rem;
-  }
-
-  /* ── Combat layout (three-zone) ───────────────────────────────────────── */
+  /* ── Combat layout ──────────────────────────────────────────────────────────── */
   .combat-layout {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 96px);
+    height: calc(100vh - 96px); /* subtract nav + session-bar + tabs */
     overflow: hidden;
   }
 
-  /* Zone A: monster rail */
+  /* Monster cards rail */
   .monster-rail {
     display: flex;
-    gap: .5rem;
-    padding: .5rem .75rem;
+    gap: 0.5rem;
     overflow-x: auto;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--border-muted);
+    padding: 0.625rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
     flex-shrink: 0;
   }
   .monster-card {
-    min-width: 110px;
-    max-width: 140px;
-    background: var(--surface);
+    background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: .5rem .6rem;
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.625rem;
+    min-width: 120px;
+    max-width: 150px;
     flex-shrink: 0;
-    transition: opacity .3s;
-  }
-  .monster-card.defeated { opacity: .35; }
-  .mc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .3rem; }
-  .mc-name { font-family: var(--font-heading); font-size: .78rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mc-stats { font-family: var(--font-heading); font-size: .68rem; color: var(--text-muted); margin-top: .2rem; }
-  .mc-pills { display: flex; flex-wrap: wrap; gap: 2px; margin-top: .3rem; }
-
-  /* Zone B: battle engine */
-  .battle-engine {
     display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .monster-card.defeated { opacity: 0.4; }
+  .mc-head { display: flex; align-items: baseline; gap: 0.375rem; }
+  .mc-name { font-size: 0.8125rem; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mc-sub  { margin-top: 0.125rem; }
+  .pill-row-sm { display: flex; flex-wrap: wrap; gap: 2px; }
+
+  /* Main engine row */
+  .battle-engine {
     flex: 1;
-    min-height: 0;
+    display: flex;
+    gap: 0;
     overflow: hidden;
   }
+
   .engine-left {
     width: 280px;
     flex-shrink: 0;
-    border-right: 1px solid var(--border-muted);
+    border-right: 1px solid var(--border);
     overflow-y: auto;
-    padding: .5rem;
+    padding: 0.75rem;
     display: flex;
     flex-direction: column;
-    gap: .5rem;
+    gap: 0.75rem;
   }
+
   .engine-right {
     flex: 1;
     display: flex;
-    flex-direction: column;
-    min-height: 0;
     overflow: hidden;
   }
-  .log-area {
-    flex: 1;
-    min-height: 0;
-    border-bottom: 1px solid var(--border-muted);
-    overflow: hidden;
-  }
-  .action-area {
+
+  .action-section {
+    width: 260px;
     flex-shrink: 0;
-    max-height: 260px;
-    overflow-y: auto;
-    border-top: 1px solid var(--border-muted);
-  }
-
-  .idle-combat {
-    padding: 1rem .5rem;
-    text-align: center;
-  }
-
-  .roster-grid {
+    border-right: 1px solid var(--border);
     display: flex;
-    flex-wrap: wrap;
-    gap: .4rem;
-    justify-content: center;
+    flex-direction: column;
+    overflow: hidden;
   }
+
+  .log-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .section-heading {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    padding: 0.4rem 0.625rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    flex-shrink: 0;
+  }
+
+  /* Party sidebar */
+  .party-sidebar {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .sidebar-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    padding: 0.375rem 0.625rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .sidebar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.625rem;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .sidebar-row:last-child { border-bottom: none; }
+  .sidebar-row.sidebar-mine { background: #eff6ff; }
+  .sidebar-av {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.625rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .sidebar-info { flex: 1; min-width: 0; }
+  .sidebar-name { font-size: 0.8125rem; font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar-hp   { display: block; }
+  .edit-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    padding: 0.125rem 0.375rem;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .edit-btn:hover { background: var(--surface-3); }
+
+  /* Idle state */
+  .idle-state { display: flex; flex-direction: column; }
+  .idle-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    margin-bottom: 0.5rem;
+  }
+  .roster-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.375rem; }
   .roster-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: .15rem;
-    background: var(--surface-2);
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius);
-    padding: .5rem .55rem;
-    min-width: 72px;
-    max-width: 90px;
-    transition: border-color .2s;
+    gap: 0.125rem;
+    text-align: center;
   }
-  .roster-card:hover { border-color: var(--gold-dim); }
-  .roster-mine { border-color: #3a6b8b; }
-  .roster-avatar {
-    width: 32px; height: 32px;
+  .roster-card.roster-mine { background: #eff6ff; border-color: #bfdbfe; }
+  .roster-av {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
     background: var(--surface-3);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--font-heading);
-    font-size: .7rem; font-weight: 700;
-    color: var(--gold-dim);
-  }
-  .roster-name {
-    font-family: var(--font-heading);
-    font-size: .72rem; font-weight: 600;
-    color: var(--text);
-    text-align: center;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    max-width: 80px;
-  }
-  .roster-meta {
-    font-family: var(--font-body);
-    font-size: .65rem;
-    color: var(--text-muted);
-    text-align: center;
-  }
-  .roster-hp {
-    font-family: var(--font-heading);
-    font-size: .68rem;
-    color: var(--text);
-    display: flex; gap: .2rem; align-items: center;
-  }
-  .rest-controls {
-    margin-top: auto;
-    padding-top: .5rem;
-    border-top: 1px solid var(--border-muted);
-  }
-
-  /* Zone C: player rail */
-  .player-rail {
     display: flex;
-    gap: .5rem;
-    padding: .5rem .75rem;
-    overflow-x: auto;
-    background: var(--bg-2);
-    border-top: 1px solid var(--border-muted);
-    flex-shrink: 0;
-  }
-  .player-card {
-    min-width: 130px;
-    max-width: 170px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: .5rem .6rem;
-    flex-shrink: 0;
-    position: relative;
-    transition: border-color .2s;
-  }
-  .player-card.active { border-color: var(--gold); animation: glow 2s infinite; }
-  .player-card.mine   { border-color: #3a6b8b; }
-  .player-card.unconscious { opacity: .5; }
-  .unconscious-overlay {
-    position: absolute; inset: 0;
-    background: rgba(139,26,26,0.7);
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--font-heading);
-    font-size: .7rem;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
     font-weight: 700;
-    letter-spacing: .12em;
-    color: #e8a0a0;
-    border-radius: var(--radius);
+    color: var(--text-muted);
   }
-  .pc-header { display: flex; flex-direction: column; margin-bottom: .3rem; }
-  .pc-name { font-family: var(--font-heading); font-size: .82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pc-meta { font-family: var(--font-body); font-size: .72rem; color: var(--text-muted); }
-  .pc-stats { display: flex; gap: .5rem; font-family: var(--font-heading); font-size: .7rem; color: var(--text-muted); margin-top: .2rem; }
-  .resource-pips { display: flex; gap: .25rem; margin-top: .3rem; }
-  .res-pip {
-    font-family: var(--font-heading);
-    font-size: .62rem;
-    font-weight: 700;
-    padding: 1px 5px;
-    border-radius: 999px;
-    background: var(--gold-dim);
-    color: var(--bg);
-    border: 1px solid var(--gold);
-  }
-  .res-pip.spent { background: var(--border-muted); color: var(--text-dim); border-color: var(--border-muted); text-decoration: line-through; }
+  .roster-name { font-size: 0.8125rem; font-weight: 600; }
+  .roster-meta { font-size: 0.7rem; }
+  .roster-stat { font-size: 0.7rem; }
 
-  /* ── World layout ─────────────────────────────────────────────────────── */
+  /* ── World layout ─────────────────────────────────────────────────────────── */
   .world-layout {
     display: flex;
-    gap: 1rem;
-    padding: 1rem;
+    gap: 0;
     height: calc(100vh - 96px);
     overflow: hidden;
   }
-  .world-dm-col {
-    width: 380px;
+
+  .world-left {
+    width: 320px;
     flex-shrink: 0;
+    border-right: 1px solid var(--border);
     overflow-y: auto;
-  }
-  .world-player-col { flex: 1; overflow-y: auto; }
-
-  .feed-history-item {
-    display: flex;
-    align-items: center;
-    gap: .5rem;
-    padding: .4rem 0;
-    border-bottom: 1px solid var(--border-muted);
-    font-size: .88rem;
-  }
-  .feed-history-item:last-child { border-bottom: none; }
-
-  .roll-feed { margin-top: .75rem; }
-  .roll-line {
-    font-family: 'Courier New', monospace;
-    font-size: .78rem;
-    color: var(--text-muted);
-    padding: .15rem 0;
-    border-bottom: 1px solid var(--border-muted);
+    padding: 1rem;
   }
 
-  /* ── Character sheet ──────────────────────────────────────────────────── */
-  .char-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1rem;
-    padding-top: 1rem;
-  }
-  .char-sheet { min-width: 0; }
-  .char-sheet-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: .75rem; }
-
-  .ability-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: .3rem; margin-bottom: .75rem; }
-  .ability-block {
-    display: flex; flex-direction: column; align-items: center;
-    background: var(--surface-2);
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius);
-    padding: .4rem .2rem;
-    gap: .1rem;
-  }
-  .ability-mod { font-family: var(--font-heading); font-size: .9rem; font-weight: 700; color: var(--gold); }
-  .ability-score { font-family: var(--font-heading); font-size: .72rem; color: var(--text-muted); }
-  .ability-label { font-family: var(--font-heading); font-size: .6rem; letter-spacing: .06em; color: var(--text-dim); text-transform: uppercase; }
-
-  .stat-row { display: flex; gap: .5rem; }
-  .stat-block {
+  .world-feed {
     flex: 1;
-    background: var(--surface-2);
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius);
-    padding: .35rem .4rem;
-    display: flex; flex-direction: column; align-items: center;
-  }
-  .stat-val { font-family: var(--font-heading); font-size: .88rem; font-weight: 700; color: var(--text); }
-  .stat-label { font-family: var(--font-heading); font-size: .6rem; letter-spacing: .06em; color: var(--text-dim); text-transform: uppercase; }
-
-  .inv-table { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .82rem; }
-  .inv-table th {
-    font-family: var(--font-heading);
-    font-size: .65rem;
-    letter-spacing: .06em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    text-align: left;
-    padding: .25rem .4rem;
-    border-bottom: 1px solid var(--border-muted);
-  }
-  .inv-table td {
-    font-family: var(--font-body);
-    padding: .2rem .4rem;
-    border-bottom: 1px solid var(--border-muted);
-    color: var(--text);
-  }
-
-  /* ── Party sidebar (combat left panel) ───────────────────────────────────── */
-  .party-sidebar {
-    border-top: 1px solid var(--border-muted);
-    padding-top: .5rem;
+    overflow-y: auto;
+    padding: 1rem;
     display: flex;
     flex-direction: column;
-    gap: .2rem;
+    gap: 1rem;
   }
-  .party-sidebar-label {
-    font-family: var(--font-heading);
-    font-size: .65rem;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    color: var(--gold-dim);
-    margin: 0 0 .25rem 0;
+
+  .skill-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    box-shadow: var(--shadow-sm);
   }
-  .party-sidebar-row {
+
+  .roll-feed {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .roll-row {
     display: flex;
     align-items: center;
-    gap: .45rem;
-    padding: .25rem .35rem;
-    border-radius: var(--radius);
-    border: 1px solid transparent;
-    transition: background .15s;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8125rem;
   }
-  .party-sidebar-row:hover { background: var(--surface-2); }
-  .sidebar-mine { border-color: #3a6b8b !important; }
-  .party-sidebar-av {
-    width: 26px; height: 26px;
+  .roll-row:last-child { border-bottom: none; }
+  .roll-name   { flex-shrink: 0; font-weight: 600; }
+  .roll-result { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .roll-total  { font-weight: 700; min-width: 2em; text-align: right; }
+
+  /* ── Characters tab ────────────────────────────────────────────────────────── */
+  .page-pad { padding: 1.25rem; }
+
+  .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0.875rem; }
+
+  .char-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .char-card.char-mine { border-color: #93c5fd; }
+
+  .char-head { display: flex; align-items: flex-start; gap: 0.625rem; }
+  .char-av {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
     background: var(--surface-3);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--font-heading);
-    font-size: .62rem; font-weight: 700;
-    color: var(--gold-dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.75rem;
+    color: var(--text-muted);
     flex-shrink: 0;
   }
-  .party-sidebar-info { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  .party-sidebar-name {
-    font-family: var(--font-heading);
-    font-size: .73rem; font-weight: 600;
-    color: var(--text);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .party-sidebar-hp {
-    font-family: var(--font-heading);
-    font-size: .62rem;
-    color: var(--text-muted);
-  }
-  .party-sidebar-edit {
-    background: none; border: none;
-    color: var(--text-muted); cursor: pointer;
-    font-size: .78rem; padding: 2px 4px;
-    border-radius: var(--radius); flex-shrink: 0;
-    line-height: 1;
-  }
-  .party-sidebar-edit:hover { color: var(--gold); background: var(--surface-2); }
+  .char-name { font-weight: 700; font-size: 0.9375rem; display: flex; align-items: center; gap: 0.375rem; }
+  .char-meta { font-size: 0.8125rem; }
 
-  /* ── Character edit modal ─────────────────────────────────────────────────── */
-  .edit-overlay {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.65);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 200;
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.25rem;
   }
-  .edit-modal { width: 300px; max-width: 90vw; }
-  .edit-modal-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 1rem;
-  }
-  .edit-modal-body {
-    display: flex; flex-direction: column; gap: .6rem;
-    margin-bottom: 1rem;
-  }
-  .edit-field { display: flex; flex-direction: column; gap: .2rem; }
-  .edit-field label {
-    font-family: var(--font-heading);
-    font-size: .65rem; letter-spacing: .06em; text-transform: uppercase;
-    color: var(--text-muted);
-  }
-  .edit-field input {
-    background: var(--bg-2);
-    border: 1px solid var(--border-muted);
+  .stat-box {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    color: var(--text);
-    padding: .35rem .5rem;
-    font-family: var(--font-heading);
-    font-size: .88rem;
-    width: 100%;
-    box-sizing: border-box;
+    padding: 0.3rem 0.25rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
   }
-  .edit-field input:focus { outline: none; border-color: var(--gold-dim); }
-  .edit-modal-footer {
-    display: flex; justify-content: flex-end; gap: .5rem;
+  .stat-label { font-size: 0.65rem; font-weight: 600; color: var(--text-faint); text-transform: uppercase; }
+  .stat-val   { font-size: 0.875rem; font-weight: 700; }
+  .stat-mod   {}
+
+  .combat-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.25rem;
+  }
+  .cstat {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.35rem 0.375rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+  }
+  .cstat-label { font-size: 0.65rem; font-weight: 600; color: var(--text-faint); text-transform: uppercase; }
+  .cstat-val   { font-size: 0.875rem; font-weight: 700; }
+
+  /* ── Lore tab ─────────────────────────────────────────────────────────────── */
+  .lore-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .lore-entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .lore-entry-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.375rem; }
+  .lore-entry-title { font-weight: 600; font-size: 0.9rem; flex: 1; }
+  .lore-entry-body { line-height: 1.6; }
+
+  /* ── Modals ────────────────────────────────────────────────────────────────── */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    max-width: 640px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-md);
+  }
+
+  .modal-sm { max-width: 420px; }
+  .modal-title { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+
+  /* ── Empty state ────────────────────────────────────────────────────────────── */
+  .empty-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 2.5rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ── Responsive ────────────────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .battle-engine { flex-direction: column; }
+    .engine-left  { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 240px; }
+    .engine-right { flex: 1; }
+    .action-section { width: 220px; }
+    .world-layout { flex-direction: column; }
+    .world-left { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 320px; }
+    .char-grid { grid-template-columns: 1fr; }
+    .roster-grid { grid-template-columns: repeat(3, 1fr); }
+    .stat-row { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  @media (max-width: 600px) {
+    .combat-stats { grid-template-columns: repeat(2, 1fr); }
+    .stat-row { grid-template-columns: repeat(3, 1fr); }
+    .roster-grid { grid-template-columns: 1fr 1fr; }
   }
 </style>

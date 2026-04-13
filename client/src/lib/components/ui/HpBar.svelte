@@ -1,33 +1,27 @@
 <script>
+  /** Compact horizontal HP bar — used in monster cards and party sidebars. */
   export let current = 0;
-  export let max     = 1;
+  export let max     = 0;
 
-  $: pct   = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
-  $: color = pct > 50 ? 'var(--success)' : pct > 25 ? 'var(--warning)' : 'var(--crimson)';
+  $: pct   = max > 0 ? Math.max(0, Math.min(1, current / max)) : 0;
+  $: color = pct > 0.5 ? 'var(--hp-high)' : pct > 0.25 ? 'var(--hp-med)' : 'var(--hp-low)';
 </script>
 
-<div class="hpbar-track">
-  <div class="hpbar-fill" style="width:{pct}%; background:{color};"></div>
+<div class="bar-track" role="meter" aria-valuenow={current} aria-valuemax={max} aria-label="HP">
+  <div class="bar-fill" style="width: {pct * 100}%; background: {color};"></div>
 </div>
-<span class="hpbar-label">{current}/{max}</span>
 
 <style>
-  .hpbar-track {
+  .bar-track {
     height: 4px;
-    background: var(--border-muted);
+    background: var(--border);
     border-radius: 2px;
     overflow: hidden;
-    margin-bottom: 2px;
+    width: 100%;
   }
-  .hpbar-fill {
+  .bar-fill {
     height: 100%;
     border-radius: 2px;
-    transition: width .5s ease-out, background .5s ease-out;
-  }
-  .hpbar-label {
-    font-family: 'Courier New', monospace;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
+    transition: width 0.3s ease, background 0.3s ease;
   }
 </style>

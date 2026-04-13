@@ -2,17 +2,17 @@
   import { goto } from '$app/navigation';
 
   let joinKey = '';
-  let error = '';
+  let error   = '';
 
   async function handleJoin() {
     error = '';
     const key = joinKey.trim().toUpperCase();
-    if (key.length !== 6) { error = 'Join key must be 6 characters'; return; }
+    if (key.length !== 6) { error = 'Session key must be 6 characters.'; return; }
 
     try {
-      const res = await fetch(`/api/sessions/join/${key}`, { method: 'POST', credentials: 'include' });
+      const res  = await fetch(`/api/sessions/join/${key}`, { method: 'POST', credentials: 'include' });
       const data = await res.json();
-      if (!res.ok) { error = data.message || 'Invalid key'; return; }
+      if (!res.ok) { error = data.message || 'Invalid session key.'; return; }
       goto(`/join/${key}`);
     } catch {
       error = 'Could not connect. Is the server running?';
@@ -26,22 +26,17 @@
   <div class="container">
 
     <!-- Hero -->
-    <section style="text-align:center; padding: 5rem 0 3rem;">
-      <p style="font-family:var(--font-heading); font-size:0.75rem; letter-spacing:0.25em; text-transform:uppercase; color:var(--gold-dim); margin-bottom:1rem;">
-        Tabletop Combat Management
-      </p>
-      <h1 style="font-size:3rem; font-weight:900; color:var(--gold); margin-bottom:1rem; text-shadow:0 2px 16px rgba(201,168,76,0.25);">
-        Dungeon Tracker
-      </h1>
-      <p style="font-size:1.15rem; color:var(--text-muted); font-family:var(--font-body); max-width:480px; margin:0 auto 2.5rem; font-style:italic; line-height:1.7;">
-        A real-time companion for Dungeon Masters. Govern your campaign, command the initiative order, and shape the fate of your table.
+    <section class="hero">
+      <p class="hero-eyebrow">Tabletop Combat Management</p>
+      <h1 class="hero-title">Dungeon Tracker</h1>
+      <p class="hero-sub">
+        A real-time companion for Dungeon Masters. Govern your campaign,
+        command the initiative order, and shape the fate of your table.
       </p>
 
-      <!-- Join form -->
-      <div class="card" style="max-width:360px; margin:0 auto;">
-        <h2 style="font-family:var(--font-heading); font-size:1rem; letter-spacing:0.06em; margin-bottom:1rem; color:var(--gold);">
-          Enter a Session
-        </h2>
+      <!-- Session join card -->
+      <div class="join-card">
+        <h2 class="join-card-title">Enter a Session</h2>
         <form on:submit|preventDefault={handleJoin}>
           <div class="field">
             <label for="key">Session Key</label>
@@ -50,7 +45,7 @@
               bind:value={joinKey}
               placeholder="AB3X9Z"
               maxlength="6"
-              style="text-transform:uppercase; letter-spacing:0.2em; font-size:1.15rem; text-align:center; font-family:var(--font-heading);"
+              class="key-input"
             />
           </div>
           {#if error}<div class="alert alert-error">{error}</div>{/if}
@@ -59,47 +54,130 @@
       </div>
     </section>
 
-    <!-- Ornamental divider -->
-    <div style="text-align:center; margin:1rem 0 2.5rem; color:var(--gold-dim); font-size:1.2rem; letter-spacing:0.4em;">
-      ✦ ✦ ✦
-    </div>
-
     <!-- Features -->
-    <section class="grid-3" style="gap:1.5rem; padding-bottom:4rem;">
-      <div class="card" style="border-top:2px solid var(--gold-dim);">
-        <h3 style="font-family:var(--font-heading); font-size:0.9rem; letter-spacing:0.05em; color:var(--gold); margin-bottom:.75rem;">
-          Campaign Ledger
-        </h3>
-        <p class="text-muted text-sm" style="font-family:var(--font-body); line-height:1.7;">
-          Chronicle your campaign roster, pen lore entries, and assemble your party of adventurers before each session.
+    <section class="features">
+      <div class="feature-card">
+        <h3>Campaign Ledger</h3>
+        <p class="text-muted text-sm">
+          Chronicle your roster, write lore entries, and assemble your party
+          of adventurers before each session.
         </p>
       </div>
-      <div class="card" style="border-top:2px solid var(--gold-dim);">
-        <h3 style="font-family:var(--font-heading); font-size:0.9rem; letter-spacing:0.05em; color:var(--gold); margin-bottom:.75rem;">
-          Combat Command
-        </h3>
-        <p class="text-muted text-sm" style="font-family:var(--font-body); line-height:1.7;">
-          Roll initiative, track hit points, manage conditions, and conduct real-time encounters with your full party.
+      <div class="feature-card">
+        <h3>Combat Command</h3>
+        <p class="text-muted text-sm">
+          Roll initiative, track hit points, manage conditions, and run
+          real-time encounters with your full party.
         </p>
       </div>
-      <div class="card" style="border-top:2px solid var(--gold-dim);">
-        <h3 style="font-family:var(--font-heading); font-size:0.9rem; letter-spacing:0.05em; color:var(--gold); margin-bottom:.75rem;">
-          World Chronicle
-        </h3>
-        <p class="text-muted text-sm" style="font-family:var(--font-body); line-height:1.7;">
-          Reveal lore cards, narrate events, and weave the world's history directly to your players in the session.
+      <div class="feature-card">
+        <h3>World Chronicle</h3>
+        <p class="text-muted text-sm">
+          Reveal lore cards, narrate events, and weave the world's history
+          directly to your players in the session.
         </p>
       </div>
     </section>
 
-    <div style="text-align:center; padding-bottom:3rem;">
-      <p style="color:var(--text-muted); font-family:var(--font-body); font-style:italic; margin-bottom:1.25rem;">
-        Commanding a campaign?
-      </p>
+    <div class="cta-row">
       <a href="/register" class="btn btn-primary">Create DM Account</a>
-      <span style="margin:0 1rem; color:var(--text-dim);">—</span>
-      <a href="/login" class="btn btn-ghost">Log In</a>
+      <a href="/login"    class="btn btn-secondary">Log in</a>
     </div>
 
   </div>
 </main>
+
+<style>
+  .hero {
+    text-align: center;
+    padding: 4rem 0 3rem;
+    max-width: 540px;
+    margin: 0 auto;
+  }
+
+  .hero-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-faint);
+    margin-bottom: 1rem;
+  }
+
+  .hero-title {
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 0.875rem;
+  }
+
+  .hero-sub {
+    font-size: 1rem;
+    color: var(--text-muted);
+    line-height: 1.7;
+    margin-bottom: 2rem;
+  }
+
+  .join-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    max-width: 340px;
+    margin: 0 auto;
+    box-shadow: var(--shadow);
+  }
+
+  .join-card-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+  }
+
+  /* Monospaced, centered key input */
+  .key-input {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 1.25rem;
+    text-align: center;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin: 2.5rem 0;
+  }
+
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .feature-card h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .cta-row {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    padding-bottom: 3rem;
+  }
+
+  @media (max-width: 640px) {
+    .features { grid-template-columns: 1fr; }
+    .hero-title { font-size: 1.875rem; }
+  }
+</style>

@@ -71,11 +71,6 @@ function initSocket(io) {
       });
     }
 
-    // Replay persisted lore cards so reconnecting clients are caught up
-    if (session.pushedLore?.length) {
-      socket.emit('world:loreFeed', session.pushedLore);
-    }
-
     // Register domain handlers
     registerCombatHandlers(io, socket, room, session);
     registerWorldHandlers(io, socket, room, session);

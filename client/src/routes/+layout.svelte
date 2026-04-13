@@ -5,55 +5,59 @@
   import { goto } from '$app/navigation';
   import { auth, setUser, clearUser } from '$lib/stores/auth';
 
-  const PUBLIC = ['/', '/login', '/register', '/join', '/session'];
-
+  // Routes accessible without authentication
   function isPublic(pathname) {
-    return PUBLIC.some(p => pathname === p || pathname.startsWith('/join/') || pathname.startsWith('/session/'));
+    return (
+      pathname === '/' ||
+      pathname === '/login' ||
+      pathname === '/register' ||
+      pathname.startsWith('/join/') ||
+      pathname.startsWith('/session/')
+    );
   }
 
   onMount(async () => {
     try {
       const res = await fetch('/api/auth/me', { credentials: 'include' });
-      if (res.ok) {
-        setUser(await res.json());
-      } else {
-        clearUser();
-      }
+      res.ok ? setUser(await res.json()) : clearUser();
     } catch {
       clearUser();
     }
   });
 
+  // Redirect unauthenticated users away from protected routes
   $: if (!$auth.loading && !$auth.user && !isPublic($page.url.pathname)) {
     goto('/login');
+  }
+
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    clearUser();
+    goto('/');
   }
 </script>
 
 <nav>
-  <div class="container">
+  <div class="nav-inner">
     <a href="/" class="nav-brand">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--gold)">
-        <path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/><path d="M19 21l2-2"/>
+      <!-- Minimal sword icon, inline SVG — no icon library needed -->
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+           stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+           aria-hidden="true">
+        <path d="M10 2l4 4-7 7-4-1-1-4z" />
+        <path d="M2 14l3-3" />
       </svg>
       Dungeon Tracker
     </a>
+
     <div class="nav-links">
       {#if $auth.user}
         <a href="/dashboard">Dashboard</a>
-        <span class="text-muted text-sm" style="font-family:var(--font-body)">{$auth.user.email}</span>
-        <button
-          class="btn btn-ghost btn-sm"
-          on:click={async () => {
-            await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-            clearUser();
-            goto('/');
-          }}
-        >
-          Log Out
-        </button>
+        <span class="text-faint text-sm">{$auth.user.email}</span>
+        <button class="btn btn-ghost btn-sm" on:click={logout}>Log out</button>
       {:else if !$auth.loading}
-        <a href="/login">Log In</a>
-        <a href="/register" class="btn btn-primary btn-sm">Register</a>
+        <a href="/login">Log in</a>
+        <a href="/register" class="btn btn-secondary btn-sm">Register</a>
       {/if}
     </div>
   </div>

@@ -62,32 +62,14 @@ const PlayerSchema = new mongoose.Schema({
   preparedSpells: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Spell' }],
 }, { _id: true });
 
-// ── LoreEntrySchema ───────────────────────────────────────────────────────────
-// A single piece of campaign lore authored by the DM.
-// `visibleToPlayers` controls whether the entry can be pushed to the player
-// lore feed during a session's world phase.
-const LoreEntrySchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  body:  { type: String, default: '' },
-  category: {
-    type: String,
-    enum: ['world', 'faction', 'npc', 'location', 'custom'],
-    default: 'custom',
-  },
-  // When true the DM can broadcast this entry as a lore card during a session
-  visibleToPlayers: { type: Boolean, default: false },
-}, { _id: true, timestamps: true });
-
 // ── CampaignSchema ────────────────────────────────────────────────────────────
 // Top-level document owned by a single DM. Holds the full roster of player
-// characters and all lore entries for the campaign. Sessions reference this
-// document via campaignId.
+// characters. Sessions reference this document via campaignId.
 const CampaignSchema = new mongoose.Schema({
   dmId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   name:        { type: String, required: true, trim: true },
   description: { type: String, default: '' },
   players:     [PlayerSchema],
-  lore:        [LoreEntrySchema],
 }, { timestamps: true });
 
 // Scope all queries to the owning DM — no cross-DM campaign leakage

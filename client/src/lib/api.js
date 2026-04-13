@@ -1,10 +1,6 @@
 /**
- * Thin fetch wrapper.
- * - In the browser, all calls go to /api/... (Vite proxies to Express on :3001)
- * - On the SvelteKit Node server (SSR), calls go to http://localhost:3001/api/...
- *
- * Pass `cookie` (the raw cookie header string) when calling from server-side
- * load functions so the JWT is forwarded.
+ * Thin fetch wrapper — identical to the original client.
+ * SSR-safe: uses full URL on the server, relative URL in the browser.
  */
 
 const SERVER_BASE = 'http://localhost:3001';
@@ -15,7 +11,7 @@ function base() {
 
 async function request(method, path, { data, cookie } = {}) {
   const headers = {};
-  if (data) headers['Content-Type'] = 'application/json';
+  if (data)   headers['Content-Type'] = 'application/json';
   if (cookie) headers['Cookie'] = cookie;
 
   const res = await fetch(`${base()}/api${path}`, {

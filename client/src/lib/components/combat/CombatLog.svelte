@@ -8,18 +8,17 @@
   let el;
   let dmNote = '';
 
-  afterUpdate(() => {
-    if (el) el.scrollTop = el.scrollHeight;
-  });
+  // Auto-scroll to bottom on new entries
+  afterUpdate(() => { if (el) el.scrollTop = el.scrollHeight; });
 
   const TYPE_COLOR = {
-    damage:   'var(--crimson)',
+    damage:   'var(--danger)',
     heal:     'var(--success)',
-    condition:'#7a4ab8',
+    condition:'#7c3aed',
     roll:     'var(--warning)',
-    action:   'var(--gold-dim)',
-    dm_note:  '#3a6b8b',
-    system:   'var(--text-dim)',
+    action:   'var(--text-muted)',
+    dm_note:  '#2563eb',
+    system:   'var(--text-faint)',
   };
 
   function sendNote() {
@@ -33,26 +32,26 @@
 <div class="log-wrapper">
   <div class="log-scroll" bind:this={el}>
     {#each entries as entry}
-      <div class="log-entry" style="--type-color:{TYPE_COLOR[entry.type] || 'var(--text-dim)'}">
+      <div class="log-row" style="--c: {TYPE_COLOR[entry.type] ?? 'var(--text-faint)'}">
         <span class="log-time">
           {new Date(entry.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
         </span>
         <span class="log-msg">{entry.message}</span>
       </div>
     {:else}
-      <p class="empty">The chronicle awaits the first blow…</p>
+      <p class="log-empty">No events yet.</p>
     {/each}
   </div>
 
   {#if isDM}
-    <form class="dm-note-form" on:submit|preventDefault={sendNote}>
+    <form class="note-form" on:submit|preventDefault={sendNote}>
       <input
-        class="dm-note-input"
+        class="note-input"
         bind:value={dmNote}
-        placeholder="Add DM note to chronicle…"
+        placeholder="Add a note to the log…"
         maxlength="200"
       />
-      <button class="btn btn-ghost btn-sm" type="submit">Record</button>
+      <button class="btn btn-secondary btn-sm" type="submit">Log</button>
     </form>
   {/if}
 </div>
@@ -63,63 +62,52 @@
   .log-scroll {
     flex: 1;
     overflow-y: auto;
-    padding: .4rem .5rem;
+    padding: 0.375rem 0.5rem;
     display: flex;
     flex-direction: column;
     gap: 1px;
   }
 
-  .log-entry {
+  .log-row {
     display: flex;
-    gap: .45rem;
+    gap: 0.5rem;
     align-items: flex-start;
-    padding: 2px 4px 2px 7px;
-    border-left: 2px solid var(--type-color);
+    padding: 2px 4px 2px 8px;
+    border-left: 2px solid var(--c);
     border-radius: 0 2px 2px 0;
   }
 
   .log-time {
-    font-family: 'Courier New', monospace;
-    font-size: .68rem;
-    color: var(--text-dim);
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.7rem;
+    color: var(--text-faint);
     white-space: nowrap;
     flex-shrink: 0;
+    padding-top: 1px;
   }
 
   .log-msg {
-    font-family: var(--font-body);
-    font-size: .82rem;
+    font-size: 0.8125rem;
     color: var(--text);
     line-height: 1.4;
     word-break: break-word;
   }
 
-  .empty {
-    font-family: var(--font-body);
-    font-style: italic;
-    color: var(--text-muted);
-    font-size: .85rem;
+  .log-empty {
+    font-size: 0.875rem;
+    color: var(--text-faint);
     text-align: center;
-    padding: 2rem 1rem;
+    padding: 2rem;
+    font-style: italic;
   }
 
-  .dm-note-form {
+  .note-form {
     display: flex;
-    gap: .4rem;
-    padding: .4rem .5rem;
-    border-top: 1px solid var(--border-muted);
+    gap: 0.375rem;
+    padding: 0.375rem 0.5rem;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
-  .dm-note-input {
-    flex: 1;
-    background: var(--bg-2);
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius);
-    color: var(--text);
-    padding: .3rem .55rem;
-    font-family: var(--font-body);
-    font-size: .82rem;
-  }
-  .dm-note-input::placeholder { color: var(--text-dim); }
-  .dm-note-input:focus { outline: none; border-color: var(--gold-dim); }
+  .note-input { flex: 1; font-size: 0.8125rem; }
 </style>
