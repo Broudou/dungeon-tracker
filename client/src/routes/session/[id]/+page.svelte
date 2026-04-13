@@ -36,6 +36,10 @@
   let worldRollFeed = [];
   let toast = '';
 
+  let editingPlayer = null;
+  let editForm = {};
+  let editSaving = false;
+
   $: isDM = !!$auth?.user;
   $: phase = sessionData?.phase ?? 'open-world';
   $: myCharObj = campaignData?.players?.find(p => p._id === myCharId) || null;
@@ -98,6 +102,17 @@
     socket.on('world:loreCard',       (card)  => worldFeed.update(f => [...f, card]));
     socket.on('world:roll',           (r)     => worldRollFeed = [...worldRollFeed.slice(-50), r]);
 
+    socket.on('player:updated', ({ playerId, combat, conditions }) => {
+      if (campaignData) {
+        campaignData = {
+          ...campaignData,
+          players: campaignData.players.map(p =>
+            p._id === playerId ? { ...p, combat, conditions } : p
+          ),
+        };
+      }
+    });
+
     socket.emit('combat:getState');
 
     loading = false;
@@ -109,6 +124,48 @@
     if (typeof document === 'undefined') return '';
     const match = document.cookie.match(/(?:^|;\s*)token=([^;]+)/);
     return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function openEdit(player) {
+    editingPlayer = player;
+    editForm = {
+      hpCurrent:    player.combat?.hpCurrent    ?? 0,
+      hpMax:        player.combat?.hpMax        ?? 0,
+      AC:           player.combat?.AC           ?? 10,
+      speed:        player.combat?.speed        ?? 30,
+      initiativeMod:player.combat?.initiativeMod ?? 0,
+    };
+  }
+
+  function closeEdit() { editingPlayer = null; editForm = {}; }
+
+  async function saveEdit() {
+    if (!editingPlayer || editSaving) return;
+    editSaving = true;
+    try {
+      if (isDM) {
+        const res = await fetch(
+          `/api/campaigns/${sessionData.campaignId}/players/${editingPlayer._id}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ combat: { ...editingPlayer.combat, ...editForm } }),
+          }
+        );
+        if (res.ok) {
+          const updated = await res.json();
+          campaignData = {
+            ...campaignData,
+            players: campaignData.players.map(p => p._id === updated._id ? { ...p, ...updated } : p),
+          };
+        }
+      } else {
+        getSocket()?.emit('player:updateSelf', { hpCurrent: Number(editForm.hpCurrent) });
+      }
+    } catch { /* silent */ }
+    editSaving = false;
+    closeEdit();
   }
 
   function handleCombatStart(e) {
@@ -216,6 +273,24 @@
             {isDM}
             {myCharId}
           />
+          {#if campaignData?.players?.length}
+            <div class="party-sidebar">
+              <p class="party-sidebar-label">Party</p>
+              {#each campaignData.players as p (p._id)}
+                {@const isMe = p._id === myCharId}
+                <div class="party-sidebar-row" class:sidebar-mine={isMe}>
+                  <span class="party-sidebar-av">{p.name.slice(0,2).toUpperCase()}</span>
+                  <div class="party-sidebar-info">
+                    <span class="party-sidebar-name">{p.name}</span>
+                    <span class="party-sidebar-hp">HP {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0} · AC {p.combat?.AC ?? 10}</span>
+                  </div>
+                  {#if isDM || isMe}
+                    <button class="party-sidebar-edit" on:click={() => openEdit(p)} title="Edit">✎</button>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
         {:else if isDM}
           <div class="idle-combat">
             {#if campaignData?.players?.length}
@@ -404,17 +479,19 @@
     {#if campaignData?.players?.length}
       <div class="char-grid">
         {#each campaignData.players as player}
-          {@const canView = isDM || player._id === myCharId}
-          {#if canView}
-            <div class="char-sheet card">
-              <div class="char-sheet-header">
-                <div>
-                  <h2 style="font-size:1.1rem;">{player.name}</h2>
-                  <p class="text-muted text-sm" style="font-family:var(--font-body); font-style:italic;">
-                    {player.race} {player.class} · Level {player.level}
-                  </p>
-                </div>
+          {@const canEdit = isDM || player._id === myCharId}
+          <div class="char-sheet card">
+            <div class="char-sheet-header">
+              <div>
+                <h2 style="font-size:1.1rem;">{player.name}</h2>
+                <p class="text-muted text-sm" style="font-family:var(--font-body); font-style:italic;">
+                  {player.race} {player.class} · Level {player.level}
+                </p>
               </div>
+              {#if canEdit}
+                <button class="btn btn-ghost btn-sm" on:click={() => openEdit(player)}>Edit</button>
+              {/if}
+            </div>
 
               <div class="ability-grid">
                 {#each ['STR','DEX','CON','INT','WIS','CHA'] as ab}
@@ -475,7 +552,6 @@
                 </details>
               {/if}
             </div>
-          {/if}
         {/each}
       </div>
     {:else}
@@ -534,6 +610,49 @@
     on:start={handleCombatStart}
     on:close={() => showStartModal = false}
   />
+{/if}
+
+{#if editingPlayer}
+  <div class="edit-overlay" on:click|self={closeEdit}>
+    <div class="edit-modal card">
+      <div class="edit-modal-header">
+        <h3 style="font-family:var(--font-heading); font-size:1rem; margin:0; color:var(--gold);">
+          {editingPlayer.name}
+        </h3>
+        <button class="btn btn-ghost btn-sm" on:click={closeEdit}>✕</button>
+      </div>
+      <div class="edit-modal-body">
+        <div class="edit-field">
+          <label>HP Current</label>
+          <input type="number" bind:value={editForm.hpCurrent} min="0" />
+        </div>
+        {#if isDM}
+          <div class="edit-field">
+            <label>HP Max</label>
+            <input type="number" bind:value={editForm.hpMax} min="0" />
+          </div>
+          <div class="edit-field">
+            <label>AC</label>
+            <input type="number" bind:value={editForm.AC} min="1" />
+          </div>
+          <div class="edit-field">
+            <label>Speed (ft)</label>
+            <input type="number" bind:value={editForm.speed} min="0" />
+          </div>
+          <div class="edit-field">
+            <label>Initiative Modifier</label>
+            <input type="number" bind:value={editForm.initiativeMod} />
+          </div>
+        {/if}
+      </div>
+      <div class="edit-modal-footer">
+        <button class="btn btn-ghost btn-sm" on:click={closeEdit}>Cancel</button>
+        <button class="btn btn-primary btn-sm" on:click={saveEdit} disabled={editSaving}>
+          {editSaving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -865,5 +984,102 @@
     padding: .2rem .4rem;
     border-bottom: 1px solid var(--border-muted);
     color: var(--text);
+  }
+
+  /* ── Party sidebar (combat left panel) ───────────────────────────────────── */
+  .party-sidebar {
+    border-top: 1px solid var(--border-muted);
+    padding-top: .5rem;
+    display: flex;
+    flex-direction: column;
+    gap: .2rem;
+  }
+  .party-sidebar-label {
+    font-family: var(--font-heading);
+    font-size: .65rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--gold-dim);
+    margin: 0 0 .25rem 0;
+  }
+  .party-sidebar-row {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .25rem .35rem;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    transition: background .15s;
+  }
+  .party-sidebar-row:hover { background: var(--surface-2); }
+  .sidebar-mine { border-color: #3a6b8b !important; }
+  .party-sidebar-av {
+    width: 26px; height: 26px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-heading);
+    font-size: .62rem; font-weight: 700;
+    color: var(--gold-dim);
+    flex-shrink: 0;
+  }
+  .party-sidebar-info { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .party-sidebar-name {
+    font-family: var(--font-heading);
+    font-size: .73rem; font-weight: 600;
+    color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .party-sidebar-hp {
+    font-family: var(--font-heading);
+    font-size: .62rem;
+    color: var(--text-muted);
+  }
+  .party-sidebar-edit {
+    background: none; border: none;
+    color: var(--text-muted); cursor: pointer;
+    font-size: .78rem; padding: 2px 4px;
+    border-radius: var(--radius); flex-shrink: 0;
+    line-height: 1;
+  }
+  .party-sidebar-edit:hover { color: var(--gold); background: var(--surface-2); }
+
+  /* ── Character edit modal ─────────────────────────────────────────────────── */
+  .edit-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.65);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .edit-modal { width: 300px; max-width: 90vw; }
+  .edit-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  .edit-modal-body {
+    display: flex; flex-direction: column; gap: .6rem;
+    margin-bottom: 1rem;
+  }
+  .edit-field { display: flex; flex-direction: column; gap: .2rem; }
+  .edit-field label {
+    font-family: var(--font-heading);
+    font-size: .65rem; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .edit-field input {
+    background: var(--bg-2);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: .35rem .5rem;
+    font-family: var(--font-heading);
+    font-size: .88rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .edit-field input:focus { outline: none; border-color: var(--gold-dim); }
+  .edit-modal-footer {
+    display: flex; justify-content: flex-end; gap: .5rem;
   }
 </style>
