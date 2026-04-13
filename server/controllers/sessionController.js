@@ -33,7 +33,7 @@ exports.create = async (req, res) => {
 
 exports.get = async (req, res) => {
   try {
-    const session = await Session.findById(req.params.id).populate('campaignId', 'name');
+    const session = await Session.findById(req.params.id);
     if (!session) return res.status(404).json({ message: 'Session not found' });
     res.json(session);
   } catch (err) {
