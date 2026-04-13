@@ -30,6 +30,11 @@
   let displayName   = '';
   let worldRollFeed = [];
   let toast         = '';
+  let allSpells     = [];
+  let expandedSpells    = new Set();
+  let expandedCreatures = new Set();
+  let spellFilter   = '';
+  let creatureFilter = '';
 
   // HP edit modal
   let editingPlayer = null;
@@ -96,12 +101,16 @@
       }
     } catch { /* non-fatal */ }
 
-    // Load monster list for DM combat setup (non-fatal)
+    // Load monster list and spell list for DM (non-fatal)
     if (isDM) {
       try {
         const res = await fetch('/api/monsters?limit=500', { credentials: 'include' });
         if (res.ok) monsterList = await res.json();
-      } catch { /* non-fatal — CombatSetup uses local data fallback */ }
+      } catch { /* non-fatal */ }
+      try {
+        const res = await fetch('/api/spells?limit=500', { credentials: 'include' });
+        if (res.ok) allSpells = await res.json();
+      } catch { /* non-fatal */ }
     }
 
     // Connect socket
@@ -241,6 +250,10 @@
   <button class="tab-btn" class:active={activeTab==='combat'}     on:click={() => activeTab='combat'}>Combat</button>
   <button class="tab-btn" class:active={activeTab==='characters'} on:click={() => activeTab='characters'}>Characters</button>
   <button class="tab-btn" class:active={activeTab==='abilities'}  on:click={() => activeTab='abilities'}>Abilities</button>
+  {#if isDM}
+    <button class="tab-btn" class:active={activeTab==='spells'}    on:click={() => activeTab='spells'}>Spells</button>
+    <button class="tab-btn" class:active={activeTab==='creatures'}  on:click={() => activeTab='creatures'}>Creatures</button>
+  {/if}
 </div>
 
 <!-- ══════════════════════════════════════════════ COMBAT TAB ══ -->
@@ -447,6 +460,82 @@
       {myCharId}
       {isDM}
     />
+  </div>
+{/if}
+
+<!-- ══════════════════════════════════════════════ SPELLS TAB ══ -->
+{#if activeTab === 'spells' && isDM}
+  <div class="ref-tab">
+    <div class="ref-search-bar">
+      <input class="ref-search" type="search" placeholder="Filter spells…" bind:value={spellFilter} />
+    </div>
+    {#each spellsByLevel(allSpells.filter(s => !spellFilter || s.name.toLowerCase().includes(spellFilter.toLowerCase()))) as group (group.lvl)}
+      <div class="ref-group">
+        <div class="ref-group-label">{group.lvl === 0 ? 'Cantrips' : `Level ${group.lvl}`}</div>
+        {#each group.list as spell (spell._id)}
+          {@const open = expandedSpells.has(spell._id)}
+          <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedSpells.delete(spell._id); else expandedSpells.add(spell._id); expandedSpells = expandedSpells; }}>
+            <div class="ref-card-head">
+              <span class="ref-card-name">{spell.name}</span>
+              <span class="ref-card-meta">{spell.school}</span>
+              <span class="ref-chevron">{open ? '▲' : '▼'}</span>
+            </div>
+            {#if open}
+              <div class="ref-card-body">
+                <div class="ref-meta-row">
+                  {#if spell.castingTime}<span><strong>Cast:</strong> {spell.castingTime}</span>{/if}
+                  {#if spell.range}<span><strong>Range:</strong> {spell.range}</span>{/if}
+                  {#if spell.concentration}<span class="pill pill-yellow">Concentration</span>{/if}
+                </div>
+                {#if spell.classes?.length}
+                  <div class="ref-classes">{spell.classes.join(', ')}</div>
+                {/if}
+              </div>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/each}
+    {#if allSpells.length === 0}
+      <p class="ref-empty">No spells loaded.</p>
+    {/if}
+  </div>
+{/if}
+
+<!-- ══════════════════════════════════════════════ CREATURES TAB ══ -->
+{#if activeTab === 'creatures' && isDM}
+  <div class="ref-tab">
+    <div class="ref-search-bar">
+      <input class="ref-search" type="search" placeholder="Filter creatures…" bind:value={creatureFilter} />
+    </div>
+    {@const filtered = monsterList.filter(m => !creatureFilter || m.name.toLowerCase().includes(creatureFilter.toLowerCase()))}
+    {#each filtered as creature (creature._id)}
+      {@const open = expandedCreatures.has(creature._id)}
+      <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedCreatures.delete(creature._id); else expandedCreatures.add(creature._id); expandedCreatures = expandedCreatures; }}>
+        <div class="ref-card-head">
+          <span class="ref-card-name">{creature.name}</span>
+          <div class="ref-card-badges">
+            {#if creature.cr != null}<span class="badge">CR {creature.cr}</span>{/if}
+            {#if creature.type}<span class="ref-card-meta">{creature.type}</span>{/if}
+          </div>
+          <span class="ref-chevron">{open ? '▲' : '▼'}</span>
+        </div>
+        {#if open}
+          <div class="ref-card-body">
+            <div class="ref-meta-row">
+              {#if creature.size}<span><strong>Size:</strong> {creature.size}</span>{/if}
+              {#if creature.alignment}<span><strong>Alignment:</strong> {creature.alignment}</span>{/if}
+              {#if creature.AC != null}<span><strong>AC:</strong> {creature.AC}</span>{/if}
+              {#if creature.hp != null}<span><strong>HP:</strong> {creature.hp}</span>{/if}
+              {#if creature.speed}<span><strong>Speed:</strong> {creature.speed}</span>{/if}
+            </div>
+          </div>
+        {/if}
+      </button>
+    {/each}
+    {#if monsterList.length === 0}
+      <p class="ref-empty">No creatures loaded.</p>
+    {/if}
   </div>
 {/if}
 
@@ -1142,4 +1231,76 @@
     .stat-row { grid-template-columns: repeat(3, 1fr); }
     .roster-grid { grid-template-columns: 1fr 1fr; }
   }
+
+  /* ── Reference tabs (Spells / Creatures) ───────────────────────────────────── */
+  .ref-tab {
+    padding: 0.75rem 1.25rem;
+    max-width: 860px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .ref-search-bar { margin-bottom: 0.75rem; }
+  .ref-search {
+    width: 100%;
+    max-width: 360px;
+    padding: 0.375rem 0.625rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.875rem;
+  }
+  .ref-group { margin-bottom: 0.5rem; }
+  .ref-group-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.25rem;
+  }
+  .ref-card {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.25rem;
+    cursor: pointer;
+    transition: background 0.1s;
+    color: var(--text);
+    font-size: 0.875rem;
+  }
+  .ref-card:hover { background: var(--surface-2); }
+  .ref-card.ref-open { background: var(--surface-2); border-color: var(--border-strong, var(--border)); }
+  .ref-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .ref-card-name { font-weight: 600; flex: 1; }
+  .ref-card-meta { font-size: 0.75rem; color: var(--text-muted); }
+  .ref-card-badges { display: flex; align-items: center; gap: 0.25rem; }
+  .ref-chevron { font-size: 0.65rem; color: var(--text-faint); margin-left: auto; flex-shrink: 0; }
+  .ref-card-body { padding-top: 0.5rem; }
+  .ref-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .ref-classes {
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--text-faint);
+    font-style: italic;
+  }
+  .ref-empty { color: var(--text-muted); font-size: 0.875rem; padding: 1rem 0; }
 </style>
