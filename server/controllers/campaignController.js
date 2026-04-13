@@ -3,7 +3,8 @@ const Campaign = require('../models/Campaign');
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 async function ownedCampaign(id, userId) {
-  const campaign = await Campaign.findOne({ _id: id, dmId: userId });
+  const campaign = await Campaign.findOne({ _id: id, dmId: userId })
+    .populate('players.knownSpells');
   return campaign; // null if not found or not owned
 }
 

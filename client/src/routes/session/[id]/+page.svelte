@@ -35,6 +35,24 @@
   let editForm      = {};
   let editSaving    = false;
 
+  // Character sheet modal
+  let sheetChar = null;
+
+  function openSheet(p) { sheetChar = p; }
+  function closeSheet() { sheetChar = null; }
+
+  function spellsByLevel(spells = []) {
+    const groups = {};
+    for (const s of spells) {
+      const lvl = s.level ?? 0;
+      if (!groups[lvl]) groups[lvl] = [];
+      groups[lvl].push(s);
+    }
+    return Object.entries(groups)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([lvl, list]) => ({ lvl: Number(lvl), list }));
+  }
+
   $: isDM    = !!$auth?.user;
   $: phase   = sessionData?.phase ?? 'open-world';
   $: myCharObj = campaignData?.players?.find(p => p._id === myCharId) ?? null;
@@ -366,18 +384,13 @@
         <div class="char-grid">
           {#each campaignData.players as p (p._id)}
             {@const isMe = p._id === myCharId}
-            <div class="char-card" class:char-mine={isMe}>
+            <button class="char-card" class:char-mine={isMe} on:click={() => openSheet(p)}>
               <div class="char-head">
                 <div class="char-av">{p.name.slice(0,2).toUpperCase()}</div>
                 <div>
                   <div class="char-name">{p.name} {#if isMe}<span class="badge">You</span>{/if}</div>
                   <div class="char-meta text-sm text-muted">Lv {p.level} {p.race} {p.class}</div>
                 </div>
-                {#if isDM || isMe}
-                  <button class="btn btn-secondary btn-sm" style="margin-left: auto;" on:click={() => openEdit(p)}>
-                    Edit HP
-                  </button>
-                {/if}
               </div>
 
               <!-- Ability scores -->
@@ -416,7 +429,7 @@
               </div>
 
               <HpBar current={p.combat?.hpCurrent ?? 0} max={p.combat?.hpMax ?? 1} />
-            </div>
+            </button>
           {/each}
         </div>
       {/if}
@@ -438,6 +451,158 @@
       <button class="btn btn-ghost btn-sm" style="margin-top: 1rem;" on:click={() => showStartModal = false}>
         Cancel
       </button>
+    </div>
+  </div>
+{/if}
+
+<!-- Character Sheet Modal -->
+{#if sheetChar}
+  {@const p = sheetChar}
+  {@const isMe = p._id === myCharId}
+  <div class="modal-backdrop" on:click|self={closeSheet} role="presentation">
+    <div class="modal modal-sheet" role="dialog" aria-modal="true" aria-label="Character Sheet">
+
+      <!-- Header -->
+      <div class="sheet-header">
+        <div class="char-av char-av-lg">{p.name.slice(0,2).toUpperCase()}</div>
+        <div class="sheet-identity">
+          <h2 class="sheet-name">{p.name} {#if isMe}<span class="badge">You</span>{/if}</h2>
+          <div class="sheet-meta">
+            Lv {p.level} · {[p.race, p.class, p.subclass].filter(Boolean).join(' ')}
+            {#if p.background} · {p.background}{/if}
+            {#if p.alignment} · {p.alignment}{/if}
+          </div>
+        </div>
+        <div class="sheet-header-actions">
+          {#if isDM || isMe}
+            <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => { closeSheet(); openEdit(p); }}>
+              Edit HP
+            </button>
+          {/if}
+          <button class="btn btn-ghost btn-sm" on:click={closeSheet}>✕</button>
+        </div>
+      </div>
+
+      <!-- Ability scores -->
+      {#if p.stats}
+        <div class="sheet-section-title">Ability Scores</div>
+        <div class="stat-row">
+          {#each ['STR','DEX','CON','INT','WIS','CHA'] as s}
+            {@const val = p.stats[s] ?? 10}
+            {@const mod = Math.floor((val - 10) / 2)}
+            <div class="stat-box">
+              <span class="stat-label">{s}</span>
+              <span class="stat-val">{val}</span>
+              <span class="stat-mod text-xs text-muted">{mod >= 0 ? '+' : ''}{mod}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Combat stats -->
+      <div class="sheet-section-title">Combat</div>
+      <div class="sheet-combat-grid">
+        <div class="cstat">
+          <span class="cstat-label">HP</span>
+          <span class="cstat-val">{p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0}</span>
+        </div>
+        {#if p.combat?.tempHp > 0}
+          <div class="cstat">
+            <span class="cstat-label">Temp HP</span>
+            <span class="cstat-val">{p.combat.tempHp}</span>
+          </div>
+        {/if}
+        <div class="cstat">
+          <span class="cstat-label">AC</span>
+          <span class="cstat-val">{p.combat?.AC ?? 10}</span>
+        </div>
+        <div class="cstat">
+          <span class="cstat-label">Speed</span>
+          <span class="cstat-val">{p.combat?.speed ?? 30}ft</span>
+        </div>
+        <div class="cstat">
+          <span class="cstat-label">Initiative</span>
+          <span class="cstat-val">{p.combat?.initiativeMod >= 0 ? '+' : ''}{p.combat?.initiativeMod ?? 0}</span>
+        </div>
+        {#if p.combat?.hitDice}
+          <div class="cstat">
+            <span class="cstat-label">Hit Dice</span>
+            <span class="cstat-val">{p.combat.hitDice}</span>
+          </div>
+        {/if}
+      </div>
+      <HpBar current={p.combat?.hpCurrent ?? 0} max={p.combat?.hpMax ?? 1} />
+
+      <!-- Conditions -->
+      {#if p.conditions?.length}
+        <div class="sheet-section-title">Conditions</div>
+        <div class="pill-row-sm" style="margin-bottom: 0.25rem;">
+          {#each p.conditions as cond}
+            <span class="pill pill-red">{cond}</span>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Spell slots -->
+      {#if p.spellSlots && Object.keys(p.spellSlots).length}
+        {@const slotEntries = Object.entries(p.spellSlots).filter(([,v]) => v?.max > 0).sort(([a],[b]) => Number(a)-Number(b))}
+        {#if slotEntries.length}
+          <div class="sheet-section-title">Spell Slots</div>
+          <div class="slot-grid">
+            {#each slotEntries as [lvl, slot]}
+              <div class="slot-box">
+                <span class="slot-label">Lv {lvl}</span>
+                <span class="slot-val">{(slot.max - (slot.used ?? 0))}/{slot.max}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+
+      <!-- Known spells -->
+      {#if p.knownSpells?.length}
+        <div class="sheet-section-title">Known Spells</div>
+        {#each spellsByLevel(p.knownSpells) as group}
+          <div class="spell-group-label">
+            {group.lvl === 0 ? 'Cantrips' : `Level ${group.lvl}`}
+          </div>
+          <div class="spell-list">
+            {#each group.list as spell}
+              <div class="spell-row">
+                <div class="spell-row-top">
+                  <span class="spell-name">{spell.name}</span>
+                  <span class="spell-tags">
+                    {#if spell.school}<span class="spell-tag">{spell.school}</span>{/if}
+                    {#if spell.concentration}<span class="spell-tag spell-tag-conc">C</span>{/if}
+                  </span>
+                </div>
+                <div class="spell-row-meta text-xs text-muted">
+                  {#if spell.castingTime}{spell.castingTime}{/if}
+                  {#if spell.range} · {spell.range}{/if}
+                  {#if spell.duration} · {spell.duration}{/if}
+                  {#if spell.components} · {spell.components}{/if}
+                </div>
+                {#if spell.damageType || spell.damageDice || spell.healDice || spell.saveAbility}
+                  <div class="spell-row-effect text-xs">
+                    {#if spell.damageDice}{spell.damageDice}{/if}
+                    {#if spell.damageType} {spell.damageType}{/if}
+                    {#if spell.healDice}Heal {spell.healDice}{/if}
+                    {#if spell.saveAbility} · {spell.saveAbility} save{/if}
+                    {#if spell.halfOnSave} (half){/if}
+                  </div>
+                {/if}
+                {#if spell.description}
+                  <div class="spell-desc text-xs text-muted">{spell.description}</div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/each}
+      {:else}
+        <div class="sheet-section-title">Known Spells</div>
+        <p class="text-muted text-sm" style="margin: 0.25rem 0 0.5rem;">No spells learned.</p>
+      {/if}
+
     </div>
   </div>
 {/if}
@@ -724,7 +889,14 @@
     flex-direction: column;
     gap: 0.75rem;
     box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    width: 100%;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
+  .char-card:hover { border-color: var(--primary, #60a5fa); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #60a5fa) 20%, transparent); }
   .char-card.char-mine { border-color: #93c5fd; }
 
   .char-head { display: flex; align-items: flex-start; gap: 0.625rem; }
@@ -821,6 +993,103 @@
 
   .modal-sm { max-width: 420px; }
   .modal-title { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+
+  /* ── Character Sheet Modal ────────────────────────────────────────────────── */
+  .modal-sheet { max-width: 680px; display: flex; flex-direction: column; gap: 0.75rem; }
+
+  .sheet-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .char-av-lg {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.875rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .sheet-identity { flex: 1; min-width: 0; }
+  .sheet-name { font-size: 1.1rem; font-weight: 700; margin: 0 0 0.25rem; display: flex; align-items: center; gap: 0.375rem; }
+  .sheet-meta { font-size: 0.8125rem; color: var(--text-muted); }
+  .sheet-header-actions { display: flex; gap: 0.375rem; flex-shrink: 0; }
+
+  .sheet-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    margin-bottom: 0.375rem;
+  }
+
+  .sheet-combat-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+  }
+  .sheet-combat-grid .cstat { min-width: 70px; flex: 1; }
+
+  /* Spell slots */
+  .slot-grid { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+  .slot-box {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.3rem 0.5rem;
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    min-width: 52px;
+  }
+  .slot-label { font-size: 0.65rem; font-weight: 600; color: var(--text-faint); text-transform: uppercase; }
+  .slot-val   { font-size: 0.875rem; font-weight: 700; }
+
+  /* Spells */
+  .spell-group-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin: 0.5rem 0 0.25rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .spell-list { display: flex; flex-direction: column; gap: 0.375rem; }
+  .spell-row {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.625rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  .spell-row-top { display: flex; align-items: baseline; gap: 0.5rem; }
+  .spell-name { font-weight: 600; font-size: 0.875rem; }
+  .spell-tags { display: flex; gap: 0.25rem; margin-left: auto; }
+  .spell-tag {
+    font-size: 0.65rem;
+    padding: 0 0.375rem;
+    border-radius: 99px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .spell-tag-conc { background: #fef3c7; border-color: #fde68a; color: #92400e; }
+  .spell-row-meta  { }
+  .spell-row-effect { font-weight: 600; color: var(--text); }
+  .spell-desc {
+    margin-top: 0.125rem;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 
   /* ── Empty state ────────────────────────────────────────────────────────────── */
   .empty-card {

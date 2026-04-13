@@ -59,7 +59,9 @@ exports.lobby = async (req, res) => {
     if (!session || session.status === 'ended') {
       return res.status(404).json({ message: 'Session not found or ended' });
     }
-    const campaign = await Campaign.findById(session.campaignId).select('name players');
+    const campaign = await Campaign.findById(session.campaignId)
+      .select('name players')
+      .populate('players.knownSpells');
     res.json({
       sessionId: session._id,
       phase: session.phase,
@@ -71,8 +73,14 @@ exports.lobby = async (req, res) => {
         level: p.level,
         race: p.race,
         class: p.class,
+        subclass: p.subclass,
+        background: p.background,
+        alignment: p.alignment,
+        stats: p.stats,
         combat: p.combat,
         conditions: p.conditions,
+        spellSlots: p.spellSlots,
+        knownSpells: p.knownSpells,
       })),
     });
   } catch (err) {
