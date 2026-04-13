@@ -508,8 +508,7 @@
     <div class="ref-search-bar">
       <input class="ref-search" type="search" placeholder="Filter creatures…" bind:value={creatureFilter} />
     </div>
-    {@const filtered = monsterList.filter(m => !creatureFilter || m.name.toLowerCase().includes(creatureFilter.toLowerCase()))}
-    {#each filtered as creature (creature._id)}
+    {#each monsterList.filter(m => !creatureFilter || m.name.toLowerCase().includes(creatureFilter.toLowerCase())) as creature (creature._id)}
       {@const open = expandedCreatures.has(creature._id)}
       <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedCreatures.delete(creature._id); else expandedCreatures.add(creature._id); expandedCreatures = expandedCreatures; }}>
         <div class="ref-card-head">
