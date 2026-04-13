@@ -1,14 +1,25 @@
 <script>
+  import { createEventDispatcher } from 'svelte';
   import { slide } from 'svelte/transition';
 
-  export let players  = [];   // full player objects with populated knownSpells
-  export let myCharId = null;
-  export let isDM     = false;
+  export let players    = [];
+  export let myCharId   = null;
+  export let isDM       = false;
+  export let allSpells  = [];
+  export let campaignId = null;
 
-  let selectedCharId = null;
-  let expanded       = new Set(); // spell IDs that are expanded
+  const dispatch = createEventDispatcher();
 
-  // DM: default to first character; player: always own character
+  let selectedCharId  = null;
+  let expanded        = new Set();
+  let editingStats    = false;
+  let statsForm       = {};
+  let statsSaving     = false;
+  let addSpellOpen    = false;
+  let spellSearch     = '';
+
+  const STATS = ['STR','DEX','CON','INT','WIS','CHA'];
+
   $: if (!selectedCharId) {
     selectedCharId = isDM ? (players[0]?._id ?? null) : myCharId;
   }
@@ -19,33 +30,36 @@
     (selectedChar?.knownSpells ?? []).filter(s => s && s.name)
   );
 
-  // ── helpers ──────────────────────────────────────────────────────────────────
+  // Spells available for this character's class (from allSpells reference list)
+  $: classSpells = selectedChar?.class
+    ? allSpells.filter(s => s.classes && s.classes.toLowerCase().split(/[,\s]+/).includes(selectedChar.class.toLowerCase()))
+    : [];
 
-  /**
-   * Standard D&D 5e full-caster max spell slot level by character level.
-   * Half-casters (Paladin, Ranger) and third-casters (Arcane Trickster, Eldritch Knight)
-   * are approximated — they still use this for the "preview locked" visual only.
-   */
-  const HALF_CASTERS   = new Set(['Paladin', 'Ranger']);
-  const THIRD_CASTERS  = new Set(['Artificer']);
+  $: filteredClassSpells = classSpells.filter(s =>
+    !spellSearch || s.name.toLowerCase().includes(spellSearch.toLowerCase())
+  );
+
+  $: knownSpellIds = new Set((selectedChar?.knownSpells ?? []).map(s => s._id ?? s));
+
+  const HALF_CASTERS  = new Set(['Paladin', 'Ranger']);
+  const THIRD_CASTERS = new Set(['Artificer']);
 
   function maxSpellLevel(charLevel, charClass) {
     const lvl = Math.min(charLevel ?? 1, 20);
     if (HALF_CASTERS.has(charClass)) {
-      const halfTable = [0,0,1,1,2,2,2,3,3,4,4,4,5,5,5,5,5,5,5,5,5];
-      return halfTable[lvl] ?? 0;
+      const t = [0,0,1,1,2,2,2,3,3,4,4,4,5,5,5,5,5,5,5,5,5];
+      return t[lvl] ?? 0;
     }
     if (THIRD_CASTERS.has(charClass)) {
-      const thirdTable = [0,1,1,1,1,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3];
-      return thirdTable[lvl] ?? 0;
+      const t = [0,1,1,1,1,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3];
+      return t[lvl] ?? 0;
     }
-    // Full caster table (Bard, Cleric, Druid, Sorcerer, Warlock, Wizard)
-    const fullTable = [0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,9,9];
-    return fullTable[lvl] ?? 0;
+    const t = [0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,9,9];
+    return t[lvl] ?? 0;
   }
 
   function isLocked(spell) {
-    if (!selectedChar || spell.level === 0) return false; // cantrips never locked
+    if (!selectedChar || spell.level === 0) return false;
     return spell.level > maxSpellLevel(selectedChar.level, selectedChar.class);
   }
 
@@ -71,23 +85,57 @@
 
   function toggleSpell(id) {
     const next = new Set(expanded);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) next.delete(id); else next.add(id);
     expanded = next;
   }
 
-  function levelLabel(lvl) {
-    return lvl === 0 ? 'Cantrips' : `Level ${lvl} Spells`;
+  function levelLabel(lvl)      { return lvl === 0 ? 'Cantrips' : `Level ${lvl} Spells`; }
+  function spellLevelBadge(lvl) { return lvl === 0 ? 'Cantrip' : `Lv ${lvl}`; }
+
+  function statMod(score) {
+    const m = Math.floor((score - 10) / 2);
+    return (m >= 0 ? '+' : '') + m;
   }
 
-  function spellLevelBadge(lvl) {
-    return lvl === 0 ? 'Cantrip' : `Lv ${lvl}`;
+  function startEditStats() {
+    statsForm = { ...selectedChar.stats };
+    editingStats = true;
+  }
+
+  async function saveStats() {
+    if (!selectedChar || statsSaving) return;
+    statsSaving = true;
+    try {
+      const res = await fetch(
+        `/api/campaigns/${campaignId}/players/${selectedChar._id}`,
+        { method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stats: statsForm }) }
+      );
+      if (res.ok) {
+        dispatch('statsUpdate', { playerId: selectedChar._id, stats: statsForm });
+      }
+    } catch { /* silent */ }
+    statsSaving = false;
+    editingStats = false;
+  }
+
+  function addSpell(spell) {
+    if (!selectedChar) return;
+    const updated = [...(selectedChar.knownSpells ?? []), spell];
+    dispatch('spellsUpdate', { playerId: selectedChar._id, knownSpells: updated });
+  }
+
+  function removeSpell(spellId) {
+    if (!selectedChar) return;
+    const updated = (selectedChar.knownSpells ?? []).filter(s => (s._id ?? s) !== spellId);
+    dispatch('spellsUpdate', { playerId: selectedChar._id, knownSpells: updated });
   }
 </script>
 
 <div class="abilities-layout">
 
-  <!-- ── DM character selector ─────────────────────────────────────────────── -->
+  <!-- ── Character selector (DM) ───────────────────────────────────────────── -->
   {#if isDM}
     <div class="char-selector">
       <span class="selector-label">Character</span>
@@ -96,7 +144,7 @@
           <button
             class="selector-pill"
             class:active={p._id === selectedCharId}
-            on:click={() => { selectedCharId = p._id; expanded = new Set(); }}
+            on:click={() => { selectedCharId = p._id; expanded = new Set(); editingStats = false; addSpellOpen = false; }}
           >
             <span class="pill-av">{p.name.slice(0, 2).toUpperCase()}</span>
             <span class="pill-name">{p.name}</span>
@@ -107,13 +155,11 @@
     </div>
   {/if}
 
-  <!-- ── No character found ─────────────────────────────────────────────────── -->
   {#if !selectedChar}
     <div class="empty-state">No character found.</div>
-
   {:else}
 
-    <!-- ── Character identity bar ─────────────────────────────────────────── -->
+    <!-- ── Identity bar ─────────────────────────────────────────────────────── -->
     <div class="char-identity">
       <div class="char-av-sm">{selectedChar.name.slice(0, 2).toUpperCase()}</div>
       <div class="char-id-info">
@@ -122,104 +168,164 @@
           Lv {selectedChar.level}
           {[selectedChar.race, selectedChar.class, selectedChar.subclass].filter(Boolean).join(' · ')}
           — Max spell slot: <strong>
-            {#if maxSpellLevel(selectedChar.level, selectedChar.class) === 0}
-              None
-            {:else}
-              {maxSpellLevel(selectedChar.level, selectedChar.class)}
-            {/if}
+            {maxSpellLevel(selectedChar.level, selectedChar.class) || 'None'}
           </strong>
         </span>
       </div>
     </div>
 
-    <!-- ── Spell groups ───────────────────────────────────────────────────── -->
-    {#if spellGroups.length === 0}
-      <div class="empty-state">This character has no learned spells.</div>
-    {:else}
-      <div class="spell-groups">
-        {#each spellGroups as group (group.lvl)}
-          <div class="spell-group">
-            <div class="group-header">
-              <span class="group-label">{levelLabel(group.lvl)}</span>
-              <span class="group-count">{group.list.length}</span>
-              {#if group.lvl > 0 && group.lvl > maxSpellLevel(selectedChar.level, selectedChar.class)}
-                <span class="lock-badge">Locked</span>
-              {/if}
-            </div>
+    <div class="tab-body">
 
-            <div class="spell-cards">
-              {#each group.list as spell (spell._id)}
-                {@const locked = isLocked(spell)}
-                {@const open   = expanded.has(spell._id)}
-                {@const comps  = parseComponents(spell.components)}
+      <!-- ── Ability Scores section ────────────────────────────────────────── -->
+      <div class="section-block">
+        <div class="section-header-row">
+          <span class="section-title">Ability Scores</span>
+          {#if isDM && !editingStats}
+            <button class="btn-inline" on:click={startEditStats}>Edit</button>
+          {/if}
+        </div>
 
-                <div class="spell-card" class:locked class:open>
-                  <!-- Card header (always visible) -->
-                  <button
-                    class="spell-card-header"
-                    on:click={() => toggleSpell(spell._id)}
-                    aria-expanded={open}
-                  >
-                    <div class="spell-card-left">
-                      <span class="spell-level-badge">{spellLevelBadge(spell.level)}</span>
-                      <span class="spell-name">{spell.name}</span>
-                      {#if spell.concentration}
-                        <span class="conc-badge" title="Concentration">C</span>
-                      {/if}
-                      {#if locked}
-                        <span class="locked-badge" title="Level too low to cast">🔒</span>
-                      {/if}
-                    </div>
+        {#if editingStats}
+          <div class="stat-edit-grid">
+            {#each STATS as s}
+              <div class="stat-edit-cell">
+                <label class="stat-edit-label">{s}</label>
+                <input type="number" min="1" max="30" class="stat-edit-input"
+                  bind:value={statsForm[s]} />
+              </div>
+            {/each}
+          </div>
+          <div class="edit-actions">
+            <button class="btn btn-primary btn-sm" on:click={saveStats} disabled={statsSaving}>
+              {statsSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button class="btn btn-ghost btn-sm" on:click={() => editingStats = false}>Cancel</button>
+          </div>
+        {:else}
+          <div class="stat-view-grid">
+            {#each STATS as s}
+              {@const val = selectedChar.stats?.[s] ?? 10}
+              <div class="stat-view-cell">
+                <span class="stat-view-label">{s}</span>
+                <span class="stat-view-val">{val}</span>
+                <span class="stat-view-mod">{statMod(val)}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
 
-                    <div class="spell-card-right">
-                      <!-- Component pips -->
-                      <div class="comp-pips">
-                        {#if comps.v}<span class="comp-pip" title="Verbal">V</span>{/if}
-                        {#if comps.s}<span class="comp-pip" title="Somatic">S</span>{/if}
-                        {#if comps.m}<span class="comp-pip" title="Material">M</span>{/if}
-                      </div>
-                      <span class="expand-chevron" class:rotated={open}>›</span>
-                    </div>
-                  </button>
+      <!-- ── Known Spells section ──────────────────────────────────────────── -->
+      <div class="section-block">
+        <div class="section-header-row">
+          <span class="section-title">Known Spells</span>
+          {#if isDM}
+            <button class="btn-inline" on:click={() => { addSpellOpen = !addSpellOpen; spellSearch = ''; }}>
+              {addSpellOpen ? 'Close' : '+ Add Spell'}
+            </button>
+          {/if}
+        </div>
 
-                  <!-- Quick-info row (always visible) -->
-                  <div class="spell-meta-row">
-                    {#if spell.castingTime}
-                      <span class="meta-chip"><span class="meta-chip-label">Cast</span> {spell.castingTime}</span>
-                    {/if}
-                    {#if spell.range}
-                      <span class="meta-chip"><span class="meta-chip-label">Range</span> {spell.range}</span>
-                    {/if}
-                    {#if spell.duration}
-                      <span class="meta-chip"><span class="meta-chip-label">Duration</span> {spell.duration}</span>
-                    {/if}
-                    {#if spell.school}
-                      <span class="meta-chip school-chip">{spell.school}</span>
-                    {/if}
-                    {#if spell.damageType}
-                      <span class="meta-chip dmg-chip">{spell.damageDice ?? ''} {spell.damageType}</span>
-                    {/if}
-                    {#if spell.healDice}
-                      <span class="meta-chip heal-chip">Heal {spell.healDice}</span>
-                    {/if}
-                    {#if spell.saveAbility}
-                      <span class="meta-chip">{spell.saveAbility} save{spell.halfOnSave ? ' (½)' : ''}</span>
-                    {/if}
-                  </div>
+        <!-- Add spell panel -->
+        {#if addSpellOpen && isDM}
+          <div class="add-spell-panel" transition:slide={{ duration: 180 }}>
+            <input
+              class="spell-search-input"
+              type="search"
+              placeholder="Search {selectedChar.class} spells…"
+              bind:value={spellSearch}
+            />
+            {#if filteredClassSpells.length === 0}
+              <p class="empty-state" style="padding: 0.75rem 0; font-size: 0.8rem;">
+                {classSpells.length === 0 ? 'No spells found for this class.' : 'No matches.'}
+              </p>
+            {:else}
+              <div class="add-spell-list">
+                {#each groupByLevel(filteredClassSpells) as group (group.lvl)}
+                  <div class="add-spell-group-label">{group.lvl === 0 ? 'Cantrips' : `Level ${group.lvl}`}</div>
+                  {#each group.list as spell (spell._id)}
+                    {@const known = knownSpellIds.has(spell._id)}
+                    <button
+                      class="add-spell-row"
+                      class:add-spell-known={known}
+                      on:click={() => known ? removeSpell(spell._id) : addSpell(spell)}
+                    >
+                      <span class="add-spell-name">{spell.name}</span>
+                      <span class="add-spell-school">{spell.school ?? ''}</span>
+                      <span class="add-spell-toggle">{known ? '✓ Learned' : '+ Learn'}</span>
+                    </button>
+                  {/each}
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
 
-                  <!-- Collapsible description -->
-                  {#if open && spell.description}
-                    <div class="spell-desc" transition:slide={{ duration: 180 }}>
-                      {spell.description}
-                    </div>
+        <!-- Spell groups -->
+        {#if spellGroups.length === 0}
+          <div class="empty-state">No learned spells.</div>
+        {:else}
+          <div class="spell-groups">
+            {#each spellGroups as group (group.lvl)}
+              <div class="spell-group">
+                <div class="group-header">
+                  <span class="group-label">{levelLabel(group.lvl)}</span>
+                  <span class="group-count">{group.list.length}</span>
+                  {#if group.lvl > 0 && group.lvl > maxSpellLevel(selectedChar.level, selectedChar.class)}
+                    <span class="lock-badge">Locked</span>
                   {/if}
                 </div>
-              {/each}
-            </div>
+                <div class="spell-cards">
+                  {#each group.list as spell (spell._id)}
+                    {@const locked = isLocked(spell)}
+                    {@const open   = expanded.has(spell._id)}
+                    {@const comps  = parseComponents(spell.components)}
+                    <div class="spell-card" class:locked class:open>
+                      <div class="spell-card-top">
+                        <button class="spell-card-header" on:click={() => toggleSpell(spell._id)} aria-expanded={open}>
+                          <div class="spell-card-left">
+                            <span class="spell-level-badge">{spellLevelBadge(spell.level)}</span>
+                            <span class="spell-name">{spell.name}</span>
+                            {#if spell.concentration}<span class="conc-badge" title="Concentration">C</span>{/if}
+                            {#if locked}<span class="locked-badge">🔒</span>{/if}
+                          </div>
+                          <div class="spell-card-right">
+                            <div class="comp-pips">
+                              {#if comps.v}<span class="comp-pip" title="Verbal">V</span>{/if}
+                              {#if comps.s}<span class="comp-pip" title="Somatic">S</span>{/if}
+                              {#if comps.m}<span class="comp-pip" title="Material">M</span>{/if}
+                            </div>
+                            <span class="expand-chevron" class:rotated={open}>›</span>
+                          </div>
+                        </button>
+                        {#if isDM}
+                          <button class="remove-spell-btn" title="Remove spell" on:click={() => removeSpell(spell._id)}>✕</button>
+                        {/if}
+                      </div>
+
+                      <div class="spell-meta-row">
+                        {#if spell.castingTime}<span class="meta-chip"><span class="meta-chip-label">Cast</span> {spell.castingTime}</span>{/if}
+                        {#if spell.range}<span class="meta-chip"><span class="meta-chip-label">Range</span> {spell.range}</span>{/if}
+                        {#if spell.duration}<span class="meta-chip"><span class="meta-chip-label">Duration</span> {spell.duration}</span>{/if}
+                        {#if spell.school}<span class="meta-chip school-chip">{spell.school}</span>{/if}
+                        {#if spell.damageType}<span class="meta-chip dmg-chip">{spell.damageDice ?? ''} {spell.damageType}</span>{/if}
+                        {#if spell.healDice}<span class="meta-chip heal-chip">Heal {spell.healDice}</span>{/if}
+                        {#if spell.saveAbility}<span class="meta-chip">{spell.saveAbility} save{spell.halfOnSave ? ' (½)' : ''}</span>{/if}
+                      </div>
+
+                      {#if open && spell.description}
+                        <div class="spell-desc" transition:slide={{ duration: 180 }}>{spell.description}</div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/each}
           </div>
-        {/each}
+        {/if}
       </div>
-    {/if}
+
+    </div>
   {/if}
 </div>
 
@@ -227,12 +333,11 @@
   .abilities-layout {
     display: flex;
     flex-direction: column;
-    gap: 0;
     height: 100%;
     overflow: hidden;
   }
 
-  /* ── Character selector (DM) ─────────────────────────────────────────────── */
+  /* ── Character selector ──────────────────────────────────────────────────── */
   .char-selector {
     display: flex;
     align-items: center;
@@ -251,10 +356,7 @@
     color: var(--text-faint);
     flex-shrink: 0;
   }
-  .selector-pills {
-    display: flex;
-    gap: 0.375rem;
-  }
+  .selector-pills { display: flex; gap: 0.375rem; }
   .selector-pill {
     display: flex;
     align-items: center;
@@ -283,7 +385,7 @@
   .pill-name { font-size: 0.8125rem; font-weight: 600; }
   .pill-meta { font-size: 0.7rem; color: var(--text-muted); }
 
-  /* ── Character identity bar ──────────────────────────────────────────────── */
+  /* ── Identity bar ────────────────────────────────────────────────────────── */
   .char-identity {
     display: flex;
     align-items: center;
@@ -306,17 +408,151 @@
   .char-id-name { font-size: 0.9375rem; font-weight: 700; }
   .char-id-meta { font-size: 0.8rem; }
 
-  /* ── Spell groups ────────────────────────────────────────────────────────── */
-  .spell-groups {
+  /* ── Body scroll area ────────────────────────────────────────────────────── */
+  .tab-body {
     flex: 1;
     overflow-y: auto;
     padding: 1rem 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 1.5rem;
   }
 
-  .spell-group {}
+  /* ── Section blocks ──────────────────────────────────────────────────────── */
+  .section-block { display: flex; flex-direction: column; gap: 0.5rem; }
+  .section-header-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.375rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    flex: 1;
+  }
+  .btn-inline {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--primary, #60a5fa);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+  }
+  .btn-inline:hover { text-decoration: underline; }
+
+  /* ── Ability score view ──────────────────────────────────────────────────── */
+  .stat-view-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.375rem;
+  }
+  .stat-view-cell {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.375rem 0.25rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+  }
+  .stat-view-label { font-size: 0.65rem; font-weight: 600; color: var(--text-faint); text-transform: uppercase; }
+  .stat-view-val   { font-size: 1rem; font-weight: 700; line-height: 1.2; }
+  .stat-view-mod   { font-size: 0.75rem; color: var(--text-muted); }
+
+  /* ── Ability score edit ──────────────────────────────────────────────────── */
+  .stat-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.375rem;
+  }
+  .stat-edit-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .stat-edit-label { font-size: 0.65rem; font-weight: 600; color: var(--text-faint); text-transform: uppercase; }
+  .stat-edit-input {
+    width: 100%;
+    text-align: center;
+    padding: 0.25rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.875rem;
+    font-family: inherit;
+  }
+  .edit-actions { display: flex; gap: 0.375rem; margin-top: 0.375rem; }
+
+  /* ── Add spell panel ─────────────────────────────────────────────────────── */
+  .add-spell-panel {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.625rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    max-height: 260px;
+    overflow: hidden;
+  }
+  .spell-search-input {
+    width: 100%;
+    padding: 0.3rem 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.8rem;
+    font-family: inherit;
+  }
+  .add-spell-list { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+  .add-spell-group-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-faint);
+    padding: 0.25rem 0.375rem 0.125rem;
+  }
+  .add-spell-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background: none;
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    transition: background 0.1s;
+  }
+  .add-spell-row:hover { background: var(--surface-3); }
+  .add-spell-row.add-spell-known { opacity: 0.6; }
+  .add-spell-name  { font-size: 0.8125rem; font-weight: 500; flex: 1; }
+  .add-spell-school { font-size: 0.7rem; color: var(--text-faint); }
+  .add-spell-toggle {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--primary, #60a5fa);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .add-spell-row.add-spell-known .add-spell-toggle { color: var(--text-faint); }
+
+  /* ── Spell groups ────────────────────────────────────────────────────────── */
+  .spell-groups { display: flex; flex-direction: column; gap: 1.25rem; }
   .group-header {
     display: flex;
     align-items: center;
@@ -350,11 +586,7 @@
     margin-left: auto;
   }
 
-  .spell-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 0.375rem;
-  }
+  .spell-cards { display: flex; flex-direction: column; gap: 0.375rem; }
 
   /* ── Spell card ──────────────────────────────────────────────────────────── */
   .spell-card {
@@ -366,20 +598,18 @@
   }
   .spell-card:not(.locked):hover { border-color: var(--primary, #60a5fa); }
   .spell-card.open { border-color: var(--primary, #60a5fa); }
+  .spell-card.locked { opacity: 0.5; filter: grayscale(0.3); }
 
-  .spell-card.locked {
-    opacity: 0.5;
-    filter: grayscale(0.3);
-    pointer-events: auto; /* keep visible + expandable for preview */
+  .spell-card-top {
+    display: flex;
+    align-items: stretch;
   }
-  .spell-card.locked .spell-card-header { cursor: default; }
-
   .spell-card-header {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
-    width: 100%;
     background: none;
     border: none;
     font: inherit;
@@ -388,7 +618,6 @@
     text-align: left;
   }
   .spell-card-header:hover { background: var(--surface-2); }
-
   .spell-card-left {
     display: flex;
     align-items: center;
@@ -424,13 +653,7 @@
     flex-shrink: 0;
   }
   .locked-badge { font-size: 0.7rem; flex-shrink: 0; }
-
-  .spell-card-right {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-  }
+  .spell-card-right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
   .comp-pips { display: flex; gap: 2px; }
   .comp-pip {
     font-size: 0.6rem;
@@ -451,7 +674,20 @@
   }
   .expand-chevron.rotated { transform: rotate(90deg); }
 
-  /* Quick-info row */
+  .remove-spell-btn {
+    padding: 0.5rem 0.625rem;
+    background: none;
+    border: none;
+    border-left: 1px solid var(--border);
+    color: var(--text-faint);
+    cursor: pointer;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    line-height: 1;
+    transition: color 0.1s, background 0.1s;
+  }
+  .remove-spell-btn:hover { color: #ef4444; background: #fee2e2; }
+
   .spell-meta-row {
     display: flex;
     flex-wrap: wrap;
@@ -467,16 +703,11 @@
     color: var(--text-muted);
     white-space: nowrap;
   }
-  .meta-chip-label {
-    font-weight: 700;
-    color: var(--text-faint);
-    margin-right: 0.2rem;
-  }
+  .meta-chip-label { font-weight: 700; color: var(--text-faint); margin-right: 0.2rem; }
   .school-chip { background: #f3e8ff; border-color: #e9d5ff; color: #6b21a8; }
   .dmg-chip    { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
   .heal-chip   { background: #dcfce7; border-color: #bbf7d0; color: #166534; }
 
-  /* Description */
   .spell-desc {
     padding: 0.5rem 0.75rem 0.625rem;
     border-top: 1px solid var(--border);
@@ -487,7 +718,6 @@
     white-space: pre-wrap;
   }
 
-  /* Empty / error */
   .empty-state {
     padding: 2.5rem;
     text-align: center;

@@ -33,8 +33,27 @@
   let allSpells     = [];
   let expandedSpells    = new Set();
   let expandedCreatures = new Set();
-  let spellFilter   = '';
+  let spellFilter    = '';
   let creatureFilter = '';
+  let crFilter       = '';
+  let typeFilter     = '';
+
+  const SUBCLASSES = {
+    Barbarian: { minLevel: 3, options: ['Path of the Berserker', 'Totem Warrior'] },
+    Bard:      { minLevel: 3, options: ['College of Lore', 'College of Valor'] },
+    Cleric:    { minLevel: 1, options: ['Knowledge', 'Life', 'Light', 'Nature', 'Tempest', 'Trickery', 'War'] },
+    Druid:     { minLevel: 2, options: ['Circle of the Land', 'Circle of the Moon'] },
+    Fighter:   { minLevel: 3, options: ['Champion', 'Battle Master', 'Eldritch Knight'] },
+    Monk:      { minLevel: 3, options: ['Open Hand', 'Shadow', 'Four Elements'] },
+    Paladin:   { minLevel: 3, options: ['Devotion', 'Ancients', 'Vengeance'] },
+    Ranger:    { minLevel: 3, options: ['Hunter', 'Beast Master'] },
+    Rogue:     { minLevel: 3, options: ['Thief', 'Assassin', 'Arcane Trickster'] },
+    Sorcerer:  { minLevel: 1, options: ['Draconic Bloodline', 'Wild Magic'] },
+    Warlock:   { minLevel: 1, options: ['Archfey', 'Fiend', 'Great Old One'] },
+    Wizard:    { minLevel: 2, options: ['Abjuration', 'Conjuration', 'Divination', 'Enchantment', 'Evocation', 'Illusion', 'Necromancy', 'Transmutation'] },
+  };
+
+  const CR_VALUES = ['0','1/8','1/4','1/2','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25','26','27','28','29','30'];
 
   // HP edit modal
   let editingPlayer = null;
@@ -45,7 +64,35 @@
   let sheetChar = null;
 
   function openSheet(p) { sheetChar = p; }
-  function closeSheet() { sheetChar = null; }
+  function closeSheet() { sheetChar = null; subclassEditing = false; }
+
+  // Subclass inline edit (DM, in character sheet)
+  let subclassEditing = false;
+  let subclassEditVal = '';
+
+  function startSubclassEdit(p) {
+    subclassEditing = true;
+    subclassEditVal = p.subclass || '';
+  }
+
+  async function saveSubclass(player) {
+    try {
+      const res = await fetch(
+        `/api/campaigns/${sessionData.campaignId}/players/${player._id}`,
+        { method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subclass: subclassEditVal }) }
+      );
+      if (res.ok) {
+        const updated = await res.json();
+        campaignData = { ...campaignData, players: campaignData.players.map(p =>
+          p._id === player._id ? { ...p, subclass: updated.subclass } : p
+        )};
+        sheetChar = { ...sheetChar, subclass: updated.subclass };
+      }
+    } catch { /* silent */ }
+    subclassEditing = false;
+  }
 
   function spellsByLevel(spells = []) {
     const groups = {};
@@ -62,6 +109,26 @@
   $: isDM    = !!$auth?.user;
   $: phase   = sessionData?.phase ?? 'open-world';
   $: myCharObj = campaignData?.players?.find(p => p._id === myCharId) ?? null;
+  $: creatureTypes = [...new Set(monsterList.map(m => m.type).filter(Boolean))].sort();
+  $: filteredCreatures = monsterList.filter(m =>
+    (!creatureFilter || m.name.toLowerCase().includes(creatureFilter.toLowerCase())) &&
+    (!crFilter || String(m.cr) === crFilter) &&
+    (!typeFilter || m.type === typeFilter)
+  );
+
+  async function handleSpellsUpdate({ detail: { playerId, knownSpells } }) {
+    campaignData = { ...campaignData, players: campaignData.players.map(p =>
+      p._id === playerId ? { ...p, knownSpells } : p
+    )};
+    try {
+      await fetch(
+        `/api/campaigns/${sessionData.campaignId}/players/${playerId}`,
+        { method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ knownSpells: knownSpells.map(s => s._id ?? s) }) }
+      );
+    } catch { /* silent */ }
+  }
 
   function getJwtFromCookie() {
     if (typeof document === 'undefined') return '';
@@ -459,6 +526,14 @@
       players={campaignData?.players ?? []}
       {myCharId}
       {isDM}
+      {allSpells}
+      campaignId={sessionData?.campaignId}
+      on:spellsUpdate={handleSpellsUpdate}
+      on:statsUpdate={({ detail: { playerId, stats } }) => {
+        campaignData = { ...campaignData, players: campaignData.players.map(p =>
+          p._id === playerId ? { ...p, stats } : p
+        )};
+      }}
     />
   </div>
 {/if}
@@ -517,10 +592,18 @@
 <!-- ══════════════════════════════════════════════ CREATURES TAB ══ -->
 {#if activeTab === 'creatures' && isDM}
   <div class="ref-tab">
-    <div class="ref-search-bar">
-      <input class="ref-search" type="search" placeholder="Filter creatures…" bind:value={creatureFilter} />
+    <div class="ref-search-bar creature-filters">
+      <input class="ref-search" type="search" placeholder="Filter by name…" bind:value={creatureFilter} />
+      <select class="ref-filter-select" bind:value={crFilter}>
+        <option value="">All CRs</option>
+        {#each CR_VALUES as cr}<option value={cr}>CR {cr}</option>{/each}
+      </select>
+      <select class="ref-filter-select" bind:value={typeFilter}>
+        <option value="">All Types</option>
+        {#each creatureTypes as t}<option value={t}>{t}</option>{/each}
+      </select>
     </div>
-    {#each monsterList.filter(m => !creatureFilter || m.name.toLowerCase().includes(creatureFilter.toLowerCase())) as creature (creature._id)}
+    {#each filteredCreatures as creature (creature._id)}
       {@const open = expandedCreatures.has(creature._id)}
       <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedCreatures.delete(creature._id); else expandedCreatures.add(creature._id); expandedCreatures = expandedCreatures; }}>
         <div class="ref-card-head">
@@ -674,9 +757,31 @@
               Edit HP
             </button>
           {/if}
+          {#if isDM && !subclassEditing}
+            <button class="btn btn-ghost btn-sm" on:click|stopPropagation={() => startSubclassEdit(p)}>
+              Edit Subclass
+            </button>
+          {/if}
           <button class="btn btn-ghost btn-sm" on:click={closeSheet}>✕</button>
         </div>
       </div>
+
+      <!-- Subclass inline edit (DM only) -->
+      {#if subclassEditing && isDM}
+        <div class="subclass-edit-row">
+          <span class="sheet-section-title" style="margin:0;">Subclass</span>
+          {#if SUBCLASSES[p.class]}
+            <select class="subclass-select" bind:value={subclassEditVal}>
+              <option value="">— none —</option>
+              {#each SUBCLASSES[p.class].options as sub}<option value={sub}>{sub}</option>{/each}
+            </select>
+          {:else}
+            <input class="subclass-input" bind:value={subclassEditVal} placeholder="Enter subclass" />
+          {/if}
+          <button class="btn btn-primary btn-sm" on:click={() => saveSubclass(p)}>Save</button>
+          <button class="btn btn-ghost btn-sm" on:click={() => subclassEditing = false}>Cancel</button>
+        </div>
+      {/if}
 
       <!-- Ability scores -->
       {#if p.stats}
@@ -1335,6 +1440,35 @@
     gap: 0;
   }
   .ref-search-bar { margin-bottom: 0.75rem; }
+  .creature-filters { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .ref-filter-select {
+    padding: 0.375rem 0.625rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.875rem;
+    font-family: inherit;
+  }
+  .subclass-edit-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .subclass-select, .subclass-input {
+    flex: 1;
+    min-width: 160px;
+    padding: 0.3rem 0.5rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.875rem;
+    font-family: inherit;
+  }
   .ref-search {
     width: 100%;
     max-width: 360px;
