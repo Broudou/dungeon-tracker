@@ -89,8 +89,29 @@
 
   function pickSpell(spell) {
     showSpellPicker = false;
-    selectAction({ label: spell.name, type: 'cast', resource: 'action', spell });
-    freeText = spell.name;
+    const s = getSocket();
+    if (!s) return;
+    const name = currentCombatant?.name ?? 'Unknown';
+    const description = `${name} cast ${spell.name}`;
+    if (isDM) {
+      s.emit('combat:dmNote', { message: `DM: ${description}` });
+    } else {
+      s.emit('combat:submitAction', { actionType: 'cast', description, params: { spellName: spell.name } });
+      waiting = true;
+    }
+  }
+
+  function announceAction(msg) {
+    const s = getSocket();
+    if (!s) return;
+    const name = currentCombatant?.name ?? 'Unknown';
+    const description = `${name} ${msg}`;
+    if (isDM) {
+      s.emit('combat:dmNote', { message: `DM: ${description}` });
+    } else {
+      s.emit('combat:submitAction', { actionType: 'improvise', description, params: {} });
+      waiting = true;
+    }
   }
 
   function selectMonsterAction(a) {
@@ -141,6 +162,9 @@
     } else if (selected.type === 'heal') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${selected.healDice || subForm.healDice || '1d8'}+${subForm.healModifier || 0})`;
       params.healDice = selected.healDice || subForm.healDice || '1d8';
+    } else if (selected.type === 'help') {
+      const name = currentCombatant?.name ?? 'Unknown';
+      description = `${name} is helping ${subForm.targetName || 'an ally'}`;
     } else if (selected.type === 'improvise' || selected.type === 'cast' || selected.type === 'legendary') {
       description = freeText || selected.label;
     }
@@ -215,14 +239,24 @@
           <div class="field-sm"><label>Modifier</label><input type="number" bind:value={subForm.healModifier} placeholder="0" /></div>
         </div>
 
-      {:else if selected.type === 'cast'}
-        <div class="field-sm"><label>Spell / Description</label><input bind:value={freeText} placeholder="Spell name + effect…" /></div>
+      {:else if selected.type === 'help'}
         <div class="field-sm">
-          <label>Slot Level</label>
-          <select bind:value={subForm.slotLevel}>
-            {#each [1,2,3,4,5,6,7,8,9] as l}<option value={l}>Level {l}</option>{/each}
+          <label>Helping</label>
+          <select bind:value={subForm.targetInstanceId}
+            on:change={e => { const t = targetOptions.find(c => c.instanceId === e.target.value); subForm.targetName = t?.name; }}>
+            <option value="">— select ally —</option>
+            {#each targetOptions as c}<option value={c.instanceId}>{c.name}</option>{/each}
           </select>
         </div>
+
+      {:else if selected.type === 'cast'}
+        <div class="field-sm">
+          <label>Spell name</label>
+          <input bind:value={freeText} placeholder="Spell name…" />
+        </div>
+        {#if canCastSpells}
+          <button class="btn btn-ghost btn-sm" on:click={openSpellPicker} style="align-self: flex-start;">Browse spells</button>
+        {/if}
 
       {:else}
         <div class="field-sm"><label>Description</label><input bind:value={freeText} placeholder="Describe the action…" /></div>
@@ -316,19 +350,20 @@
         <div class="action-grid">
           <button class="action-btn" class:disabled={!resources.action}
             on:click={() => selectAction({ label:'Attack', type:'attack', resource:'action' })}>Attack</button>
-          {#if canCastSpells}
-            <button class="action-btn" on:click={openSpellPicker}>Cast Spell</button>
-          {/if}
           <button class="action-btn"
-            on:click={() => selectAction({ label:'Heal', type:'heal', resource:'action', healDice:'1d8' })}>Heal</button>
+            on:click={() => selectAction({ label:'Cast Spell', type:'cast', resource:'action' })}>Cast Spell</button>
           <button class="action-btn"
-            on:click={() => selectAction({ label:'Dodge', type:'improvise', resource:'action' })}>Dodge</button>
+            on:click={() => announceAction('is disengaging')}>Disengage</button>
           <button class="action-btn"
-            on:click={() => selectAction({ label:'Help', type:'improvise', resource:'action' })}>Help</button>
+            on:click={() => announceAction('is dodging')}>Dodge</button>
           <button class="action-btn"
-            on:click={() => selectAction({ label:'Use Item', type:'improvise', resource:'action' })}>Use Item</button>
+            on:click={() => selectAction({ label:'Help', type:'help', resource:'action' })}>Help</button>
           <button class="action-btn"
-            on:click={() => selectAction({ label:'Improvise', type:'improvise', resource:'action' })}>Improvise</button>
+            on:click={() => announceAction('is trying to hide')}>Hide</button>
+          <button class="action-btn"
+            on:click={() => announceAction('is readying an action')}>Ready</button>
+          <button class="action-btn"
+            on:click={() => announceAction('is searching')}>Search</button>
         </div>
       </div>
 
