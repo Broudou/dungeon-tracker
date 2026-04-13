@@ -14,6 +14,7 @@
   import SkillCheckPanel    from '$lib/components/world/SkillCheckPanel.svelte';
   import DiceTray           from '$lib/components/dice/DiceTray.svelte';
   import HpBar              from '$lib/components/ui/HpBar.svelte';
+  import AbilitiesTab       from '$lib/components/session/AbilitiesTab.svelte';
 
   const sessionId = $page.params.id;
 
@@ -239,6 +240,7 @@
 <div class="tabs" style="padding: 0 1.25rem; margin-bottom: 0;">
   <button class="tab-btn" class:active={activeTab==='combat'}     on:click={() => activeTab='combat'}>Combat</button>
   <button class="tab-btn" class:active={activeTab==='characters'} on:click={() => activeTab='characters'}>Characters</button>
+  <button class="tab-btn" class:active={activeTab==='abilities'}  on:click={() => activeTab='abilities'}>Abilities</button>
 </div>
 
 <!-- ══════════════════════════════════════════════ COMBAT TAB ══ -->
@@ -434,6 +436,17 @@
         </div>
       {/if}
     </div>
+  </div>
+{/if}
+
+<!-- ══════════════════════════════════════════════ ABILITIES TAB ══ -->
+{#if activeTab === 'abilities'}
+  <div class="abilities-tab-wrap">
+    <AbilitiesTab
+      players={campaignData?.players ?? []}
+      {myCharId}
+      {isDM}
+    />
   </div>
 {/if}
 
@@ -874,6 +887,14 @@
   .roll-name   { flex-shrink: 0; font-weight: 600; }
   .roll-result { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .roll-total  { font-weight: 700; min-width: 2em; text-align: right; }
+
+  /* ── Abilities tab ─────────────────────────────────────────────────────────── */
+  .abilities-tab-wrap {
+    height: calc(100vh - 96px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
 
   /* ── Characters tab ────────────────────────────────────────────────────────── */
   .page-pad { padding: 1.25rem; }
