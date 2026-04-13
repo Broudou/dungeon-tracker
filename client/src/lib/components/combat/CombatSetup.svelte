@@ -19,8 +19,8 @@
   let selectedPlayerIds = players.map(p => p._id);
   let selectedMonsters  = [];
   let searchText        = '';
-  let filterCR          = 'all';
-  let filterType        = 'All';
+  let filterCR          = '1/4';
+  let filterType        = 'Humanoid';
   let filterEnv         = 'All';
 
   function parseCR(cr) {

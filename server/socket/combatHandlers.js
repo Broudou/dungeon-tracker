@@ -168,6 +168,29 @@ function registerCombatHandlers(io, socket, room, session) {
       combat.state = 'ended';
       await combat.save();
 
+      // Sync final HP back to campaign player documents
+      const campaign = await Campaign.findById(session.campaignId);
+      if (campaign) {
+        let dirty = false;
+        for (const c of combat.initiativeOrder) {
+          if (c.entityType !== 'player') continue;
+          const player = campaign.players.id(c.entityId);
+          if (!player) continue;
+          player.combat.hpCurrent = c.currentHp;
+          dirty = true;
+        }
+        if (dirty) {
+          await campaign.save();
+          // Notify all clients of updated player HP
+          io.to(room).emit('campaign:playersUpdated', {
+            players: campaign.players.map(p => ({
+              _id: p._id,
+              combat: p.combat,
+            })),
+          });
+        }
+      }
+
       session.phase = 'open-world';
       await session.save();
 

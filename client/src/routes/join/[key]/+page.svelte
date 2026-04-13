@@ -6,24 +6,26 @@
   const joinKey = $page.params.key.toUpperCase();
 
   let sessionData = null;
-  let campaign    = null;
+  let players     = [];
+  let campaignName = '';
   let loading     = true;
   let error       = '';
-  let displayName = '';
   let charId      = '';
 
   onMount(async () => {
     try {
-      // Validate key and get session + campaign info
-      const res = await fetch(`/api/sessions/join/${joinKey}`, { method: 'POST', credentials: 'include' });
+      // Step 1: validate key → get sessionId
+      const res = await fetch(`/api/sessions/join/${joinKey}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) { error = data.message || 'Invalid session key.'; loading = false; return; }
       sessionData = data;
 
-      // Fetch campaign for character list
-      if (data.campaignId) {
-        const cr = await fetch(`/api/campaigns/${data.campaignId}`, { credentials: 'include' });
-        if (cr.ok) campaign = await cr.json();
+      // Step 2: load public player roster via lobby endpoint
+      const lr = await fetch(`/api/sessions/${data.sessionId}/lobby`);
+      if (lr.ok) {
+        const lobby = await lr.json();
+        campaignName = lobby.campaignName;
+        players = lobby.players ?? [];
       }
     } catch {
       error = 'Could not reach the server.';
@@ -32,9 +34,15 @@
     }
   });
 
+  $: selectedChar = players.find(p => p._id === charId) ?? null;
+  $: canEnter = !!charId;
+
   function enter() {
-    if (!displayName.trim()) return;
-    const identity = { displayName: displayName.trim(), characterId: charId || null };
+    if (!canEnter) return;
+    const identity = {
+      displayName: selectedChar.name,
+      characterId: charId,
+    };
     sessionStorage.setItem(`session_${sessionData.sessionId}`, JSON.stringify(identity));
     goto(`/session/${sessionData.sessionId}`);
   }
@@ -54,37 +62,39 @@
       {:else}
 
         <p class="session-key-display">{joinKey}</p>
-        {#if campaign}
-          <h1 class="campaign-name">{campaign.name}</h1>
+        {#if campaignName}
+          <h1 class="campaign-name">{campaignName}</h1>
         {/if}
         <p class="text-muted text-sm" style="margin-bottom: 1.5rem;">
-          Enter your name and select your character to join the session.
+          Select your character to join the session.
         </p>
 
-        <div class="field">
-          <label for="name">Your name</label>
-          <input id="name" bind:value={displayName} placeholder="Gandalf" maxlength="40" />
-        </div>
-
-        {#if campaign?.players?.length}
-          <div class="field">
-            <label for="char">Character <span class="text-faint">(optional)</span></label>
-            <select id="char" bind:value={charId}>
-              <option value="">— no character —</option>
-              {#each campaign.players as p (p._id)}
-                <option value={p._id}>{p.name} — Lv {p.level} {p.race} {p.class}</option>
-              {/each}
-            </select>
+        {#if players.length}
+          <div class="char-list">
+            {#each players as p (p._id)}
+              <button
+                class="char-row"
+                class:selected={charId === p._id}
+                on:click={() => charId = p._id}
+              >
+                <span class="char-name">{p.name}</span>
+                <span class="char-meta">Lv {p.level} {p.race} {p.class}</span>
+              </button>
+            {/each}
           </div>
+        {:else}
+          <p class="text-muted text-sm">No characters found for this campaign.</p>
         {/if}
 
         <button
           class="btn btn-primary btn-full"
+          style="margin-top: 1.25rem;"
           on:click={enter}
-          disabled={!displayName.trim()}
+          disabled={!canEnter}
         >
-          Enter Session
+          Enter as {selectedChar?.name ?? '…'}
         </button>
+
       {/if}
 
     </div>
@@ -117,4 +127,36 @@
     font-weight: 700;
     margin-bottom: 0.5rem;
   }
+
+  .char-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .char-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.875rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    transition: all 0.1s;
+    width: 100%;
+  }
+
+  .char-row:hover { border-color: var(--border-strong); }
+
+  .char-row.selected {
+    border-color: var(--accent, #7c6af7);
+    background: var(--surface);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #7c6af7) 20%, transparent);
+  }
+
+  .char-name { font-size: 0.9375rem; font-weight: 600; color: var(--text); }
+  .char-meta { font-size: 0.75rem; color: var(--text-faint); }
 </style>

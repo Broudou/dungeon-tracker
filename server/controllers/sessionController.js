@@ -1,4 +1,4 @@
-const Session = require('../models/Session');
+const Session  = require('../models/Session');
 const Campaign = require('../models/Campaign');
 
 exports.create = async (req, res) => {
@@ -47,6 +47,34 @@ exports.join = async (req, res) => {
     const session = await Session.findOne({ joinKey: key, status: 'active' });
     if (!session) return res.status(404).json({ message: 'Invalid or expired join key' });
     res.json({ sessionId: session._id, campaignId: session.campaignId });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// Public lobby info: session phase + campaign player roster (no auth required)
+exports.lobby = async (req, res) => {
+  try {
+    const session = await Session.findById(req.params.id).select('campaignId phase status');
+    if (!session || session.status === 'ended') {
+      return res.status(404).json({ message: 'Session not found or ended' });
+    }
+    const campaign = await Campaign.findById(session.campaignId).select('name players');
+    res.json({
+      sessionId: session._id,
+      phase: session.phase,
+      campaignId: session.campaignId,
+      campaignName: campaign?.name ?? '',
+      players: (campaign?.players ?? []).map(p => ({
+        _id: p._id,
+        name: p.name,
+        level: p.level,
+        race: p.race,
+        class: p.class,
+        combat: p.combat,
+        conditions: p.conditions,
+      })),
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

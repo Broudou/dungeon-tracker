@@ -54,18 +54,27 @@
       } catch { /* ignore */ }
     }
 
-    // Load session
+    // Load session (public endpoint — no auth required)
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`, { credentials: 'include' });
+      const res = await fetch(`/api/sessions/${sessionId}`);
       if (!res.ok) throw new Error((await res.json()).message);
       sessionData = await res.json();
       session.set(sessionData);
     } catch (e) { error = e.message; loading = false; return; }
 
-    // Load campaign (non-fatal)
+    // Load campaign — DM gets full data; players fall back to lobby roster
     try {
       const res = await fetch(`/api/campaigns/${sessionData.campaignId}`, { credentials: 'include' });
-      if (res.ok) campaignData = await res.json();
+      if (res.ok) {
+        campaignData = await res.json();
+      } else {
+        // Player path: use public lobby endpoint for character roster
+        const lr = await fetch(`/api/sessions/${sessionId}/lobby`);
+        if (lr.ok) {
+          const lobby = await lr.json();
+          campaignData = { _id: sessionData.campaignId, name: lobby.campaignName, players: lobby.players };
+        }
+      }
     } catch { /* non-fatal */ }
 
     // Load monster list for DM combat setup (non-fatal)
@@ -105,6 +114,16 @@
           players: campaignData.players.map(p => p._id === playerId ? { ...p, combat: c, conditions } : p),
         };
       }
+    });
+
+    // Sync HP for all players after combat ends
+    socket.on('campaign:playersUpdated', ({ players }) => {
+      if (!campaignData) return;
+      const map = Object.fromEntries(players.map(p => [p._id, p]));
+      campaignData = {
+        ...campaignData,
+        players: campaignData.players.map(p => map[p._id] ? { ...p, combat: map[p._id].combat } : p),
+      };
     });
 
     socket.emit('combat:getState');
