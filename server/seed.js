@@ -46,6 +46,31 @@ async function fetchDnd5eMonsters() {
   return monsters;
 }
 
+async function fetchDnd5eSpells() {
+  const listRes = await fetch('https://www.dnd5eapi.co/api/spells', {
+    signal: AbortSignal.timeout(TIMEOUT),
+  });
+  if (!listRes.ok) throw new Error(`dnd5eapi spells list HTTP ${listRes.status}`);
+  const { results } = await listRes.json();
+  console.log(`  Found ${results.length} spells on dnd5eapi.co — fetching full data…`);
+
+  const spells = [];
+  const BATCH  = 15;
+  for (let i = 0; i < results.length; i += BATCH) {
+    const batch   = results.slice(i, i + BATCH);
+    const fetched = await Promise.all(
+      batch.map(s =>
+        fetch(`https://www.dnd5eapi.co${s.url}`, { signal: AbortSignal.timeout(TIMEOUT) })
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status} for ${s.url}`); return r.json(); })
+      )
+    );
+    spells.push(...fetched);
+    process.stdout.write(`\r  Fetched ${spells.length}/${results.length}…`);
+  }
+  process.stdout.write('\n');
+  return spells;
+}
+
 // ── open5e paginated fetcher (fallback) ───────────────────────────────────────
 
 async function fetchOpen5eAll(url, collected = []) {
@@ -135,6 +160,27 @@ function mapDnd5eMonster(m) {
   };
 }
 
+function mapDnd5eSpell(s) {
+  const dmgAtSlot = s.damage?.damage_at_slot_level ?? s.damage?.damage_at_character_level ?? {};
+  return {
+    name:          s.name,
+    level:         s.level ?? 0,
+    school:        s.school?.name || '',
+    castingTime:   s.casting_time || '',
+    range:         s.range        || '',
+    components:    (s.components || []).join(', ') + (s.material ? ` (${s.material})` : ''),
+    duration:      s.duration     || '',
+    concentration: s.concentration === true,
+    damageType:    s.damage?.damage_type?.name || null,
+    damageDice:    Object.values(dmgAtSlot)[0] || null,
+    saveAbility:   s.dc?.dc_type?.name || null,
+    halfOnSave:    s.dc?.dc_success?.toLowerCase() === 'half',
+    healDice:      s.heal_at_slot_level ? Object.values(s.heal_at_slot_level)[0] : null,
+    description:   (s.desc || []).join('\n'),
+    classes:       (s.classes || []).map(c => c.name).join(', '),
+  };
+}
+
 // ── open5e → our schema mappers ───────────────────────────────────────────────
 
 function mapOpen5eAction(a) {
@@ -205,7 +251,7 @@ function mapOpen5eSpell(s) {
       ? Object.values(s.heal_at_slot_level)[0]
       : null,
     description: s.desc   || '',
-    classes:     (s.classes || []).map(c => (typeof c === 'string' ? c : c.name)).join(', '),
+    classes:     (s.spell_lists || s.classes || []).map(c => (typeof c === 'string' ? c : c.name)).join(', '),
   };
 }
 
@@ -331,14 +377,21 @@ async function seed() {
   console.log('Seeding spells…');
   let spells;
   try {
-    const raw = await fetchOpen5eAll(
-      'https://api.open5e.com/v1/spells/?limit=100&document__slug=wotc-srd&ordering=level_int'
-    );
-    spells = raw.map(mapOpen5eSpell);
-    console.log(`  Mapped ${spells.length} spells from open5e`);
+    const raw = await fetchDnd5eSpells();
+    spells = raw.map(mapDnd5eSpell);
+    console.log(`  Mapped ${spells.length} spells from dnd5eapi.co`);
   } catch (err) {
-    console.warn(`  open5e unavailable (${err.message}), using ${FALLBACK_SPELLS.length} built-in spells`);
-    spells = FALLBACK_SPELLS;
+    console.warn(`  dnd5eapi.co unavailable (${err.message}), trying open5e…`);
+    try {
+      const raw = await fetchOpen5eAll(
+        'https://api.open5e.com/v1/spells/?limit=100&document__slug=wotc-srd&ordering=level_int'
+      );
+      spells = raw.map(mapOpen5eSpell);
+      console.log(`  Mapped ${spells.length} spells from open5e`);
+    } catch (err2) {
+      console.warn(`  open5e also unavailable (${err2.message}), using ${FALLBACK_SPELLS.length} built-in spells`);
+      spells = FALLBACK_SPELLS;
+    }
   }
 
   await Spell.deleteMany({});
