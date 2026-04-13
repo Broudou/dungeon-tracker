@@ -13,6 +13,50 @@
   let subForm  = {};
   let freeText = '';
 
+  // Spell picker
+  let showSpellPicker = false;
+  let spellList = [];
+  let spellsLoading = false;
+
+  async function openSpellPicker() {
+    showSpellPicker = true;
+    if (spellList.length) return;
+    spellsLoading = true;
+    try {
+      const classParam = myChar?.class ? `&class=${encodeURIComponent(myChar.class)}` : '';
+      const res = await fetch(`/api/spells?limit=200${classParam}`, { credentials: 'include' });
+      if (res.ok) spellList = await res.json();
+    } catch { /* non-fatal */ }
+    spellsLoading = false;
+  }
+
+  function pickSpell(spell) {
+    showSpellPicker = false;
+    selectAction({
+      label: spell.name,
+      type: 'cast',
+      resource: 'action',
+      spell,
+    });
+    freeText = spell.name;
+  }
+
+  $: spellsByLevel = (() => {
+    const groups = {};
+    for (const s of spellList) {
+      const lvl = s.level ?? 0;
+      if (!groups[lvl]) groups[lvl] = [];
+      groups[lvl].push(s);
+    }
+    return Object.entries(groups).sort(([a], [b]) => Number(a) - Number(b));
+  })();
+
+  const SCHOOL_ABBR = {
+    Abjuration: 'Abj', Conjuration: 'Con', Divination: 'Div',
+    Enchantment: 'Enc', Evocation: 'Evo', Illusion: 'Ill',
+    Necromancy: 'Nec', Transmutation: 'Tra',
+  };
+
   $: myTurn = isDM || (currentCombatant && currentCombatant.entityId === myCharId);
   $: myChar = campaign?.players?.find(p => p._id === myCharId);
   $: resources = myTurn && currentCombatant ? {
@@ -182,7 +226,7 @@
           <button class="action-btn" class:disabled={!resources.action}
             on:click={() => selectAction({ label:'Attack', type:'attack', resource:'action' })}>Attack</button>
           <button class="action-btn"
-            on:click={() => selectAction({ label:'Cast Spell', type:'cast', resource:'action' })}>Cast Spell</button>
+            on:click={openSpellPicker}>Cast Spell</button>
           <button class="action-btn"
             on:click={() => selectAction({ label:'Heal', type:'heal', resource:'action', healDice:'1d8' })}>Heal</button>
           <button class="action-btn"
@@ -224,6 +268,46 @@
     </div>
   {/if}
 </div>
+
+<!-- Spell Picker Overlay -->
+{#if showSpellPicker}
+  <div class="spell-overlay" on:click={() => showSpellPicker = false}>
+    <div class="spell-panel" on:click|stopPropagation>
+      <div class="spell-panel-header">
+        <span>Spellbook — {myChar?.name ?? 'Character'}</span>
+        <button class="btn btn-ghost btn-sm" on:click={() => showSpellPicker = false}>✕</button>
+      </div>
+
+      {#if spellsLoading}
+        <p class="text-muted" style="padding:.75rem; font-style:italic; font-size:.82rem;">Loading spells…</p>
+      {:else if spellList.length === 0}
+        <p class="text-muted" style="padding:.75rem; font-style:italic; font-size:.82rem;">
+          No spells found. Add them to the character sheet in the Campaign editor.
+        </p>
+      {:else}
+        <div class="spell-scroll">
+          {#each spellsByLevel as [level, spells]}
+            <p class="spell-level-label">
+              {Number(level) === 0 ? 'Cantrips' : `Level ${level}`}
+            </p>
+            <div class="spell-grid">
+              {#each spells as spell}
+                <button class="spell-card" on:click={() => pickSpell(spell)}>
+                  <div class="spell-school">{SCHOOL_ABBR[spell.school] ?? spell.school?.slice(0,3) ?? '?'}</div>
+                  <div class="spell-name">{spell.name}</div>
+                  <div class="spell-cast">{spell.castingTime ?? '1 action'}</div>
+                  {#if spell.concentration}
+                    <div class="spell-conc" title="Concentration">C</div>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .panel { height: 100%; overflow-y: auto; padding: .45rem; }
@@ -293,4 +377,114 @@
   }
   .field-row input:focus, .field-row select:focus { outline: none; border-color: var(--gold-dim); }
   .sub-submit { margin-top: .15rem; }
+
+  /* ── Spell Picker ─────────────────────────────────────────────────────── */
+  .spell-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 200;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+  }
+  .spell-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    width: min(480px, 100vw);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+  }
+  .spell-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .55rem .75rem;
+    border-bottom: 1px solid var(--border-muted);
+    font-family: var(--font-heading);
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--gold);
+    letter-spacing: .06em;
+    flex-shrink: 0;
+  }
+  .spell-scroll {
+    overflow-y: auto;
+    padding: .5rem .6rem .75rem;
+    flex: 1;
+  }
+  .spell-level-label {
+    font-family: var(--font-heading);
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--gold-dim);
+    border-bottom: 1px solid var(--border-muted);
+    padding-bottom: .15rem;
+    margin: .65rem 0 .35rem;
+  }
+  .spell-level-label:first-child { margin-top: 0; }
+  .spell-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+    gap: .35rem;
+  }
+  .spell-card {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--surface-2);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius);
+    padding: .4rem .3rem .3rem;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .15rem;
+    transition: border-color .15s, background .15s;
+    text-align: center;
+  }
+  .spell-card:hover {
+    border-color: var(--gold);
+    background: rgba(201,168,76,0.08);
+  }
+  .spell-school {
+    font-family: var(--font-heading);
+    font-size: .58rem;
+    letter-spacing: .05em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .spell-name {
+    font-family: var(--font-heading);
+    font-size: .7rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+    word-break: break-word;
+  }
+  .spell-cast {
+    font-family: var(--font-body);
+    font-size: .6rem;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  .spell-conc {
+    position: absolute;
+    top: 3px; right: 4px;
+    font-family: var(--font-heading);
+    font-size: .55rem;
+    font-weight: 700;
+    color: var(--gold);
+    background: rgba(201,168,76,0.15);
+    border: 1px solid var(--gold-dim);
+    border-radius: 3px;
+    padding: 0 3px;
+    line-height: 1.4;
+  }
 </style>

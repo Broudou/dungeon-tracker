@@ -201,6 +201,21 @@
   const STATS = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
   const LORE_CATEGORIES = ['world', 'faction', 'npc', 'location', 'custom'];
 
+  const DND_RACES = [
+    'Dragonborn', 'Dwarf', 'Elf', 'Gnome', 'Half-Elf',
+    'Half-Orc', 'Halfling', 'Human', 'Tiefling',
+  ];
+  const DND_CLASSES = [
+    'Artificer', 'Barbarian', 'Bard', 'Cleric', 'Druid',
+    'Fighter', 'Monk', 'Paladin', 'Ranger', 'Rogue',
+    'Sorcerer', 'Warlock', 'Wizard',
+  ];
+  const ALIGNMENTS = [
+    ['Lawful Good',    'Neutral Good',  'Chaotic Good'],
+    ['Lawful Neutral', 'True Neutral',  'Chaotic Neutral'],
+    ['Lawful Evil',    'Neutral Evil',  'Chaotic Evil'],
+  ];
+
   function statMod(score) {
     const m = Math.floor((score - 10) / 2);
     return (m >= 0 ? '+' : '') + m;
@@ -277,11 +292,33 @@
             <div class="grid-2">
               <div class="field"><label>Name *</label><input bind:value={playerForm.name} /></div>
               <div class="field"><label>Level</label><input type="number" min="1" max="20" bind:value={playerForm.level} /></div>
-              <div class="field"><label>Race</label><input bind:value={playerForm.race} /></div>
-              <div class="field"><label>Class</label><input bind:value={playerForm.class} /></div>
+              <div class="field">
+                <label>Race</label>
+                <select bind:value={playerForm.race}>
+                  <option value="">— select race —</option>
+                  {#each DND_RACES as r}<option value={r}>{r}</option>{/each}
+                </select>
+              </div>
+              <div class="field">
+                <label>Class</label>
+                <select bind:value={playerForm.class}>
+                  <option value="">— select class —</option>
+                  {#each DND_CLASSES as c}<option value={c}>{c}</option>{/each}
+                </select>
+              </div>
               <div class="field"><label>Subclass</label><input bind:value={playerForm.subclass} /></div>
               <div class="field"><label>Background</label><input bind:value={playerForm.background} /></div>
-              <div class="field"><label>Alignment</label><input bind:value={playerForm.alignment} /></div>
+              <div class="field" style="grid-column:1/-1;">
+                <label>Alignment</label>
+                <div class="alignment-grid">
+                  {#each ALIGNMENTS as row}
+                    {#each row as al}
+                      <button type="button" class="align-btn" class:selected={playerForm.alignment === al}
+                        on:click={() => playerForm.alignment = al}>{al}</button>
+                    {/each}
+                  {/each}
+                </div>
+              </div>
             </div>
 
             <p style="font-family:var(--font-heading); font-size:0.72rem; letter-spacing:0.08em;
@@ -364,11 +401,33 @@
                     <div class="grid-2">
                       <div class="field"><label>Name *</label><input bind:value={playerForm.name} /></div>
                       <div class="field"><label>Level</label><input type="number" min="1" max="20" bind:value={playerForm.level} /></div>
-                      <div class="field"><label>Race</label><input bind:value={playerForm.race} /></div>
-                      <div class="field"><label>Class</label><input bind:value={playerForm.class} /></div>
+                      <div class="field">
+                        <label>Race</label>
+                        <select bind:value={playerForm.race}>
+                          <option value="">— select race —</option>
+                          {#each DND_RACES as r}<option value={r}>{r}</option>{/each}
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label>Class</label>
+                        <select bind:value={playerForm.class}>
+                          <option value="">— select class —</option>
+                          {#each DND_CLASSES as c}<option value={c}>{c}</option>{/each}
+                        </select>
+                      </div>
                       <div class="field"><label>Subclass</label><input bind:value={playerForm.subclass} /></div>
                       <div class="field"><label>Background</label><input bind:value={playerForm.background} /></div>
-                      <div class="field"><label>Alignment</label><input bind:value={playerForm.alignment} /></div>
+                      <div class="field" style="grid-column:1/-1;">
+                        <label>Alignment</label>
+                        <div class="alignment-grid">
+                          {#each ALIGNMENTS as row}
+                            {#each row as al}
+                              <button type="button" class="align-btn" class:selected={playerForm.alignment === al}
+                                on:click={() => playerForm.alignment = al}>{al}</button>
+                            {/each}
+                          {/each}
+                        </div>
+                      </div>
                     </div>
 
                     <p style="font-family:var(--font-heading); font-size:0.72rem; letter-spacing:0.08em;
@@ -538,3 +597,32 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .alignment-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.3rem;
+    margin-top: 0.25rem;
+  }
+  .align-btn {
+    font-family: var(--font-heading);
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+    padding: 0.4rem 0.25rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    text-align: center;
+    line-height: 1.2;
+  }
+  .align-btn:hover { border-color: var(--gold-dim); color: var(--text); }
+  .align-btn.selected {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: rgba(201,168,76,0.1);
+  }
+</style>

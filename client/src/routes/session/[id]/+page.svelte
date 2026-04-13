@@ -218,16 +218,58 @@
           />
         {:else if isDM}
           <div class="idle-combat">
-            <p class="text-muted" style="font-family:var(--font-body); font-style:italic; margin-bottom:1rem;">
-              No battle is underway.
-            </p>
-            <button class="btn btn-primary" on:click={() => showStartModal = true}>
+            {#if campaignData?.players?.length}
+              <p style="font-family:var(--font-heading); font-size:0.68rem; letter-spacing:0.1em;
+                text-transform:uppercase; color:var(--gold); margin-bottom:0.6rem;">
+                Party Roster
+              </p>
+              <div class="roster-grid">
+                {#each campaignData.players as p (p._id)}
+                  <div class="roster-card">
+                    <div class="roster-avatar">{p.name.slice(0,2).toUpperCase()}</div>
+                    <div class="roster-name">{p.name}</div>
+                    <div class="roster-meta">Lv {p.level} {p.class}</div>
+                    <div class="roster-hp">
+                      <span style="color:var(--text-muted); font-size:0.65rem;">HP</span>
+                      {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0}
+                    </div>
+                    <div class="roster-hp">
+                      <span style="color:var(--text-muted); font-size:0.65rem;">AC</span>
+                      {p.combat?.AC ?? 10}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            <button class="btn btn-primary" style="margin-top:1rem;" on:click={() => showStartModal = true}>
               Begin Encounter
             </button>
           </div>
         {:else}
-          <div class="idle-combat text-muted" style="font-family:var(--font-body); font-style:italic;">
-            Awaiting the Dungeon Master to call for arms…
+          <div class="idle-combat">
+            {#if campaignData?.players?.length}
+              <p style="font-family:var(--font-heading); font-size:0.68rem; letter-spacing:0.1em;
+                text-transform:uppercase; color:var(--gold); margin-bottom:0.6rem;">
+                Party Roster
+              </p>
+              <div class="roster-grid">
+                {#each campaignData.players as p (p._id)}
+                  {@const isMe = p._id === myCharId}
+                  <div class="roster-card" class:roster-mine={isMe}>
+                    <div class="roster-avatar">{p.name.slice(0,2).toUpperCase()}</div>
+                    <div class="roster-name">{p.name}</div>
+                    <div class="roster-meta">Lv {p.level} {p.class}</div>
+                    <div class="roster-hp">
+                      <span style="color:var(--text-muted); font-size:0.65rem;">HP</span>
+                      {p.combat?.hpCurrent ?? 0}/{p.combat?.hpMax ?? 0}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            <p class="text-muted" style="font-family:var(--font-body); font-style:italic; margin-top:1rem; font-size:0.85rem;">
+              Awaiting the Dungeon Master to call for arms…
+            </p>
           </div>
         {/if}
 
@@ -625,8 +667,60 @@
   }
 
   .idle-combat {
-    padding: 1.5rem .5rem;
+    padding: 1rem .5rem;
     text-align: center;
+  }
+
+  .roster-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    justify-content: center;
+  }
+  .roster-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .15rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius);
+    padding: .5rem .55rem;
+    min-width: 72px;
+    max-width: 90px;
+    transition: border-color .2s;
+  }
+  .roster-card:hover { border-color: var(--gold-dim); }
+  .roster-mine { border-color: #3a6b8b; }
+  .roster-avatar {
+    width: 32px; height: 32px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-heading);
+    font-size: .7rem; font-weight: 700;
+    color: var(--gold-dim);
+  }
+  .roster-name {
+    font-family: var(--font-heading);
+    font-size: .72rem; font-weight: 600;
+    color: var(--text);
+    text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 80px;
+  }
+  .roster-meta {
+    font-family: var(--font-body);
+    font-size: .65rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .roster-hp {
+    font-family: var(--font-heading);
+    font-size: .68rem;
+    color: var(--text);
+    display: flex; gap: .2rem; align-items: center;
   }
   .rest-controls {
     margin-top: auto;
