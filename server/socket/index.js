@@ -15,7 +15,12 @@ const { registerWorldHandlers } = require('./worldHandlers');
 function initSocket(io) {
   // Middleware: identify DM vs player on every connection
   io.use(async (socket, next) => {
-    const { token, displayName, characterId, sessionId } = socket.handshake.auth || {};
+    const { token: authToken, displayName, characterId, sessionId } = socket.handshake.auth || {};
+
+    // Also check httpOnly cookie (DMs can't read it from JS, but it's sent in the handshake)
+    const cookieHeader = socket.handshake.headers.cookie || '';
+    const cookieMatch = cookieHeader.match(/(?:^|;\s*)token=([^;]+)/);
+    const token = authToken || (cookieMatch ? decodeURIComponent(cookieMatch[1]) : null);
 
     if (token) {
       // DM path
