@@ -5,6 +5,16 @@ const TagSchema = new mongoose.Schema({
   color: { type: String, enum: ['red', 'green', 'blue', 'yellow', 'purple'], default: 'yellow' },
 }, { _id: false });
 
+const ActionEntrySchema = new mongoose.Schema({
+  name:        String,
+  description: String,
+  attackBonus: Number,
+  damageDice:  String,
+  damageType:  String,
+  saveDC:      Number,
+  saveAbility: String,
+}, { _id: false });
+
 const CombatantSchema = new mongoose.Schema({
   entityId:         String,   // player._id or monster _id or custom creature _id
   entityType:       { type: String, enum: ['player', 'monster', 'custom'] },
@@ -29,6 +39,11 @@ const CombatantSchema = new mongoose.Schema({
     successes: { type: Number, default: 0 },
     failures:  { type: Number, default: 0 },
   },
+  // Monster/custom creature abilities (denormalised from source document)
+  actions:          [ActionEntrySchema],
+  reactions:        [ActionEntrySchema],
+  traits:           [ActionEntrySchema],
+  legendaryActions: [ActionEntrySchema],
 }, { _id: false });
 
 const PendingActionSchema = new mongoose.Schema({

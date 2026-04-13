@@ -7,37 +7,54 @@
   export let campaign         = null;
   export let combatants       = [];
 
-  let waiting        = false;
-  let selected       = null;
-  let subForm        = {};
-  let freeText       = '';
+  let waiting         = false;
+  let selected        = null;
+  let subForm         = {};
+  let freeText        = '';
   let showSpellPicker = false;
-  let spellList      = [];
-  let spellsLoading  = false;
+  let spellList       = [];
+  let spellsLoading   = false;
 
   const SCHOOL_ABBR = { Abjuration:'Abj', Conjuration:'Con', Divination:'Div', Enchantment:'Enc', Evocation:'Evo', Illusion:'Ill', Necromancy:'Nec', Transmutation:'Tra' };
 
+  const SPELLCASTER_CLASSES = ['Wizard','Sorcerer','Bard','Cleric','Druid','Warlock','Paladin','Ranger','Artificer'];
+
   const BONUS_ACTIONS = [
-    { label:'Second Wind',      type:'heal',       resource:'bonus', isBonus:true, selfOnly:true, healDice:'1d10', sub:'Fighter' },
-    { label:'Healing Word',     type:'heal',       resource:'bonus', isBonus:true, healDice:'1d4',                sub:'Bard/Cleric' },
-    { label:'Flurry of Blows',  type:'multiAttack',resource:'bonus', isBonus:true, count:2,                       sub:'Monk' },
-    { label:'Divine Smite',     type:'improvise',  resource:'bonus', isBonus:true,                               sub:'Paladin' },
-    { label:'Rage',             type:'improvise',  resource:'bonus', isBonus:true,                               sub:'Barbarian' },
-    { label:'Cunning Action',   type:'improvise',  resource:'bonus', isBonus:true,                               sub:'Rogue' },
-    { label:'Misty Step',       type:'improvise',  resource:'bonus', isBonus:true,                               sub:'Warlock/Wiz' },
-    { label:'Wild Shape',       type:'improvise',  resource:'bonus', isBonus:true,                               sub:'Druid' },
-    { label:"Hex / Hunter's Mark",type:'improvise',resource:'bonus', isBonus:true,                               sub:'Wlk/Rgr' },
-    { label:'Bardic Inspiration',type:'improvise', resource:'bonus', isBonus:true,                               sub:'Bard' },
-  ];
-  const REACTIONS = [
-    { label:'Shield',          type:'improvise', resource:'reaction', isReaction:true, sub:'Wizard' },
-    { label:'Hellish Rebuke',  type:'improvise', resource:'reaction', isReaction:true, sub:'Warlock' },
-    { label:'Counterspell',    type:'improvise', resource:'reaction', isReaction:true, sub:'Caster' },
-    { label:'Absorb Elements', type:'improvise', resource:'reaction', isReaction:true, sub:'Various' },
+    { label:'Second Wind',         type:'heal',        resource:'bonus', isBonus:true, selfOnly:true, healDice:'1d10', sub:'Fighter',    classes:['Fighter'] },
+    { label:'Healing Word',        type:'heal',        resource:'bonus', isBonus:true, healDice:'1d4',                sub:'Bard/Cleric', classes:['Bard','Cleric'] },
+    { label:'Flurry of Blows',     type:'multiAttack', resource:'bonus', isBonus:true, count:2,                       sub:'Monk',        classes:['Monk'] },
+    { label:'Divine Smite',        type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Paladin',     classes:['Paladin'] },
+    { label:'Rage',                type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Barbarian',   classes:['Barbarian'] },
+    { label:'Cunning Action',      type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Rogue',       classes:['Rogue'] },
+    { label:'Misty Step',          type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Warlock/Wiz', classes:['Warlock','Wizard','Sorcerer'] },
+    { label:'Wild Shape',          type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Druid',       classes:['Druid'] },
+    { label:"Hex / Hunter's Mark", type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Wlk/Rgr',     classes:['Warlock','Ranger'] },
+    { label:'Bardic Inspiration',  type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Bard',        classes:['Bard'] },
   ];
 
-  $: myTurn = isDM || (currentCombatant && currentCombatant.entityId === myCharId);
-  $: myChar = campaign?.players?.find(p => p._id === myCharId);
+  const REACTIONS = [
+    { label:'Shield',           type:'improvise', resource:'reaction', isReaction:true, sub:'Wizard',  classes:['Wizard','Sorcerer'] },
+    { label:'Hellish Rebuke',   type:'improvise', resource:'reaction', isReaction:true, sub:'Warlock', classes:['Warlock'] },
+    { label:'Counterspell',     type:'improvise', resource:'reaction', isReaction:true, sub:'Caster',  classes:['Wizard','Sorcerer','Bard','Cleric','Druid','Warlock'] },
+    { label:'Absorb Elements',  type:'improvise', resource:'reaction', isReaction:true, sub:'Various', classes:[] },
+    { label:'Opportunity Attack',type:'attack',   resource:'reaction', isReaction:true, sub:'All',     classes:[] },
+  ];
+
+  function matchesClass(classes, charClass) {
+    if (!classes || classes.length === 0) return true;
+    if (!charClass) return true;
+    return classes.some(c => c.toLowerCase() === charClass.toLowerCase());
+  }
+
+  $: myTurn    = isDM || (currentCombatant && currentCombatant.entityId === myCharId);
+  $: myChar    = campaign?.players?.find(p => p._id === myCharId);
+  $: isMonster = myTurn && (currentCombatant?.entityType === 'monster' || currentCombatant?.entityType === 'custom');
+  $: charClass = currentCombatant?.class ?? myChar?.class ?? '';
+  $: canCastSpells = !isMonster && SPELLCASTER_CLASSES.some(c => c.toLowerCase() === charClass.toLowerCase());
+
+  $: filteredBonusActions  = BONUS_ACTIONS.filter(a => matchesClass(a.classes, charClass));
+  $: filteredReactions     = REACTIONS.filter(a => matchesClass(a.classes, charClass));
+
   $: resources = myTurn && currentCombatant ? {
     action:   !currentCombatant.actionSpent,
     bonus:    !currentCombatant.bonusActionSpent,
@@ -52,12 +69,18 @@
     return Object.entries(g).sort(([a],[b]) => Number(a) - Number(b));
   })();
 
+  // Monster action lists
+  $: monsterActions          = currentCombatant?.actions          ?? [];
+  $: monsterReactions        = currentCombatant?.reactions        ?? [];
+  $: monsterLegendaryActions = currentCombatant?.legendaryActions ?? [];
+  $: monsterTraits           = currentCombatant?.traits           ?? [];
+
   async function openSpellPicker() {
     showSpellPicker = true;
     if (spellList.length) return;
     spellsLoading = true;
     try {
-      const classParam = myChar?.class ? `&class=${encodeURIComponent(myChar.class)}` : '';
+      const classParam = charClass ? `&class=${encodeURIComponent(charClass)}` : '';
       const res = await fetch(`/api/spells?limit=200${classParam}`, { credentials: 'include' });
       if (res.ok) spellList = await res.json();
     } catch { /* non-fatal */ }
@@ -70,12 +93,42 @@
     freeText = spell.name;
   }
 
-  function selectAction(a) {
-    selected = a; subForm = {}; freeText = '';
-    if (a.selfOnly) subForm.targetInstanceId = currentCombatant?.instanceId;
+  function selectMonsterAction(a) {
+    if (a.damageDice || a.attackBonus != null) {
+      selectAction({
+        label:       a.name,
+        description: a.description,
+        type:        'attack',
+        resource:    'action',
+        attackBonus: a.attackBonus ?? 0,
+        damageDice:  a.damageDice  ?? '1d6',
+        damageType:  a.damageType  ?? '',
+      });
+    } else {
+      selectAction({ label: a.name, description: a.description, type: 'improvise', resource: 'action' });
+      freeText = a.description ?? a.name;
+    }
   }
 
-  function cancel() { selected = null; waiting = false; }
+  function selectMonsterReaction(a) {
+    selectAction({ label: a.name, description: a.description, type: 'improvise', resource: 'reaction', isReaction: true });
+    freeText = a.description ?? a.name;
+  }
+
+  function selectLegendaryAction(a) {
+    selectAction({ label: a.name, description: a.description, type: 'improvise', resource: 'legendary' });
+    freeText = a.description ?? a.name;
+  }
+
+  function selectAction(a) {
+    selected = a; subForm = {}; freeText = a.description ? (freeText || '') : '';
+    if (a.selfOnly) subForm.targetInstanceId = currentCombatant?.instanceId;
+    if (a.attackBonus != null) subForm.attackBonus = a.attackBonus;
+    if (a.damageDice)  subForm.damageDice  = a.damageDice;
+    if (a.damageType)  subForm.damageType  = a.damageType;
+  }
+
+  function cancel() { selected = null; waiting = false; freeText = ''; }
 
   function submit() {
     const s = getSocket();
@@ -88,7 +141,7 @@
     } else if (selected.type === 'heal') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${selected.healDice || subForm.healDice || '1d8'}+${subForm.healModifier || 0})`;
       params.healDice = selected.healDice || subForm.healDice || '1d8';
-    } else if (selected.type === 'improvise' || selected.type === 'cast') {
+    } else if (selected.type === 'improvise' || selected.type === 'cast' || selected.type === 'legendary') {
       description = freeText || selected.label;
     }
 
@@ -99,6 +152,7 @@
       waiting = true;
     }
     selected = null;
+    freeText = '';
   }
 </script>
 
@@ -124,6 +178,10 @@
         <strong style="font-size: 0.875rem;">{selected.label}</strong>
         <button class="btn btn-ghost btn-sm" on:click={cancel}>✕</button>
       </div>
+
+      {#if selected.description}
+        <p class="action-desc">{selected.description}</p>
+      {/if}
 
       {#if selected.type === 'attack'}
         <div class="field-sm">
@@ -175,10 +233,78 @@
       </button>
     </div>
 
-  {:else}
-    <!-- Action chooser -->
+  {:else if isMonster}
+    <!-- Monster / custom creature action chooser -->
     <div class="chooser">
-      <!-- Resource indicators -->
+      <div class="resource-row">
+        <span class="res" class:spent={!resources.action}>Action</span>
+        <span class="res" class:spent={!resources.reaction}>Reaction</span>
+      </div>
+
+      {#if monsterActions.length}
+        <div class="action-section">
+          <p class="section-head">Actions</p>
+          <div class="action-grid">
+            {#each monsterActions as a}
+              <button class="action-btn" class:has-attack={!!(a.damageDice || a.attackBonus != null)}
+                on:click={() => selectMonsterAction(a)}>
+                {a.name}
+                {#if a.damageDice}<span class="action-sub">{a.damageDice} {a.damageType || ''}</span>{/if}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if monsterReactions.length}
+        <div class="action-section">
+          <p class="section-head">Reactions</p>
+          <div class="action-grid">
+            {#each monsterReactions as a}
+              <button class="action-btn action-btn-sm" class:disabled={!resources.reaction}
+                on:click={() => selectMonsterReaction(a)}>
+                {a.name}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if monsterLegendaryActions.length}
+        <div class="action-section">
+          <p class="section-head">Legendary Actions</p>
+          <div class="action-grid">
+            {#each monsterLegendaryActions as a}
+              <button class="action-btn action-btn-sm" on:click={() => selectLegendaryAction(a)}>
+                {a.name}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if monsterTraits.length}
+        <div class="action-section">
+          <p class="section-head">Traits</p>
+          <div class="trait-list">
+            {#each monsterTraits as t}
+              <div class="trait-row">
+                <span class="trait-name">{t.name}.</span>
+                <span class="trait-desc">{t.description ?? ''}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if !monsterActions.length && !monsterTraits.length}
+        <p class="text-faint text-sm" style="padding: 0.5rem 0;">No actions stored for this creature.</p>
+      {/if}
+    </div>
+
+  {:else}
+    <!-- Player action chooser -->
+    <div class="chooser">
       <div class="resource-row">
         <span class="res" class:spent={!resources.action}>Action</span>
         <span class="res" class:spent={!resources.bonus}>Bonus</span>
@@ -190,7 +316,9 @@
         <div class="action-grid">
           <button class="action-btn" class:disabled={!resources.action}
             on:click={() => selectAction({ label:'Attack', type:'attack', resource:'action' })}>Attack</button>
-          <button class="action-btn" on:click={openSpellPicker}>Cast Spell</button>
+          {#if canCastSpells}
+            <button class="action-btn" on:click={openSpellPicker}>Cast Spell</button>
+          {/if}
           <button class="action-btn"
             on:click={() => selectAction({ label:'Heal', type:'heal', resource:'action', healDice:'1d8' })}>Heal</button>
           <button class="action-btn"
@@ -204,29 +332,33 @@
         </div>
       </div>
 
-      <div class="action-section">
-        <p class="section-head">Bonus Actions</p>
-        <div class="action-grid">
-          {#each BONUS_ACTIONS as a}
-            <button class="action-btn action-btn-sm" class:disabled={!resources.bonus} on:click={() => selectAction(a)}>
-              {a.label}
-              <span class="action-sub">{a.sub}</span>
-            </button>
-          {/each}
+      {#if filteredBonusActions.length}
+        <div class="action-section">
+          <p class="section-head">Bonus Actions</p>
+          <div class="action-grid">
+            {#each filteredBonusActions as a}
+              <button class="action-btn action-btn-sm" class:disabled={!resources.bonus} on:click={() => selectAction(a)}>
+                {a.label}
+                <span class="action-sub">{a.sub}</span>
+              </button>
+            {/each}
+          </div>
         </div>
-      </div>
+      {/if}
 
-      <div class="action-section">
-        <p class="section-head">Reactions</p>
-        <div class="action-grid">
-          {#each REACTIONS as a}
-            <button class="action-btn action-btn-sm" class:disabled={!resources.reaction} on:click={() => selectAction(a)}>
-              {a.label}
-              <span class="action-sub">{a.sub}</span>
-            </button>
-          {/each}
+      {#if filteredReactions.length}
+        <div class="action-section">
+          <p class="section-head">Reactions</p>
+          <div class="action-grid">
+            {#each filteredReactions as a}
+              <button class="action-btn action-btn-sm" class:disabled={!resources.reaction} on:click={() => selectAction(a)}>
+                {a.label}
+                <span class="action-sub">{a.sub}</span>
+              </button>
+            {/each}
+          </div>
         </div>
-      </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -236,7 +368,7 @@
   <div class="overlay-backdrop" on:click={() => showSpellPicker = false} role="presentation"></div>
   <div class="spell-panel">
     <div class="spell-head">
-      <span>{myChar?.name ?? 'Spellbook'}</span>
+      <span>{myChar?.name ?? currentCombatant?.name ?? 'Spellbook'}</span>
       <button class="btn btn-ghost btn-sm" on:click={() => showSpellPicker = false}>✕</button>
     </div>
     {#if spellsLoading}
@@ -276,11 +408,9 @@
     justify-content: center;
   }
 
-  /* Animated wait indicator */
   .idle-dot { animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
-  /* Resource row */
   .resource-row { display: flex; gap: 0.375rem; margin-bottom: 0.75rem; }
   .res {
     font-size: 0.7rem;
@@ -300,7 +430,6 @@
     text-decoration: line-through;
   }
 
-  /* Sections */
   .chooser { display: flex; flex-direction: column; gap: 0.75rem; }
   .action-section {}
   .section-head {
@@ -333,8 +462,27 @@
   }
   .action-btn:hover:not(.disabled) { border-color: var(--border-strong); background: var(--surface); }
   .action-btn.disabled { opacity: 0.35; cursor: not-allowed; }
+  .action-btn.has-attack { border-color: var(--accent, #7c6af7); }
   .action-btn-sm { font-size: 0.75rem; padding: 0.2rem 0.55rem; }
   .action-sub { font-size: 0.65rem; color: var(--text-faint); font-style: italic; }
+
+  /* Traits */
+  .trait-list { display: flex; flex-direction: column; gap: 0.375rem; }
+  .trait-row { font-size: 0.8rem; line-height: 1.4; }
+  .trait-name { font-weight: 600; margin-right: 0.25rem; }
+  .trait-desc { color: var(--text-muted); }
+
+  /* Action description in sub-form */
+  .action-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    padding: 0.375rem 0.5rem;
+    background: var(--surface-2);
+    border-radius: var(--radius);
+    border-left: 2px solid var(--border-strong);
+    margin-bottom: 0.25rem;
+  }
 
   /* Sub-form */
   .sub-form { display: flex; flex-direction: column; gap: 0.5rem; }

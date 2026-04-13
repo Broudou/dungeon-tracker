@@ -104,6 +104,10 @@ function registerCombatHandlers(io, socket, room, session) {
             maxHp:      monster.hp?.average ?? 0,
             ac:         monster.AC ?? 10,
             cr:         monster.cr,
+            actions:          monster.actions          ?? [],
+            reactions:        monster.reactions        ?? [],
+            traits:           monster.traits           ?? [],
+            legendaryActions: monster.legendaryActions ?? [],
           });
         }
       }
@@ -123,6 +127,8 @@ function registerCombatHandlers(io, socket, room, session) {
           maxHp:      creature.hp?.max ?? 10,
           ac:         creature.ac ?? 10,
           cr:         creature.cr,
+          actions:  creature.actions ?? [],
+          traits:   creature.traits  ?? [],
         });
       }
 
