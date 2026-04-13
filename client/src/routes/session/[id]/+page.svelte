@@ -79,8 +79,11 @@
       } catch { /* non-fatal — CombatSetup falls back to local data */ }
     }
 
-    const authPayload = isDM
-      ? { token: getJwtFromCookie(), sessionId }
+    // Read the cookie directly — $auth may still be loading at this point
+    // so the isDM reactive variable cannot be trusted here.
+    const token = getJwtFromCookie();
+    const authPayload = token
+      ? { token, sessionId }
       : { displayName: displayName || 'Player', characterId: myCharId, sessionId };
 
     const socket = connectSocket(sessionId, authPayload);

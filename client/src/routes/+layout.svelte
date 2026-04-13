@@ -5,10 +5,10 @@
   import { goto } from '$app/navigation';
   import { auth, setUser, clearUser } from '$lib/stores/auth';
 
-  const PUBLIC = ['/', '/login', '/register', '/join'];
+  const PUBLIC = ['/', '/login', '/register', '/join', '/session'];
 
   function isPublic(pathname) {
-    return PUBLIC.some(p => pathname === p || pathname.startsWith('/join/'));
+    return PUBLIC.some(p => pathname === p || pathname.startsWith('/join/') || pathname.startsWith('/session/'));
   }
 
   onMount(async () => {
