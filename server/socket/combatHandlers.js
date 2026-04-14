@@ -374,6 +374,36 @@ function registerCombatHandlers(io, socket, room, session) {
     }
   });
 
+  // ── DM direct action resolve (bypasses pending queue, full damage/heal calc) ───
+  socket.on('combat:dmAction', async ({ actionType, description, params, actorInstanceId }) => {
+    if (!socket.isDM) return;
+    try {
+      const combat = await CombatSession.findOne({ sessionId: session._id });
+      if (!combat || combat.state !== 'active') return;
+
+      const actor = actorInstanceId
+        ? combat.initiativeOrder.find(c => c.instanceId === actorInstanceId)
+        : null;
+
+      const action = {
+        actionId:      uuidv4(),
+        submittedBy:   actor?.entityId ?? '',
+        submitterName: actor?.name ?? 'Unknown',
+        actionType,
+        description,
+        params:        { ...(params || {}), actorInstanceId },
+        status:        'approved',
+        submittedAt:   new Date(),
+      };
+
+      await resolveAction(combat, action, action.params, io, room);
+      await combat.save();
+      io.to(room).emit('combat:state', combat);
+    } catch (err) {
+      socket.emit('error', { message: err.message });
+    }
+  });
+
   // ── Player submits action ─────────────────────────────────────────────────────
   socket.on('combat:submitAction', async ({ actionType, description, params }) => {
     if (socket.isDM) return; // DM uses direct resolves
@@ -487,6 +517,11 @@ function registerCombatHandlers(io, socket, room, session) {
 
 // ── Action resolver ───────────────────────────────────────────────────────────
 
+function findActor(combat, action, params) {
+  if (params.actorInstanceId) return combat.initiativeOrder.find(c => c.instanceId === params.actorInstanceId);
+  return combat.initiativeOrder.find(c => c.entityId === action.submittedBy);
+}
+
 async function resolveAction(combat, action, params, io, room) {
   const { actionType } = action;
 
@@ -516,7 +551,7 @@ async function resolveAction(combat, action, params, io, room) {
     }
 
     // Mark action spent
-    const actor = combat.initiativeOrder.find(c => c.entityId === action.submittedBy);
+    const actor = findActor(combat, action, params);
     if (actor) actor.actionSpent = true;
   }
 
@@ -531,7 +566,7 @@ async function resolveAction(combat, action, params, io, room) {
       if (wasDefeated && target.currentHp > 0) target.isDefeated = false;
     }
     addLog(combat, `❤ ${action.submitterName} heals ${targetName || '?'} for ${total} HP (${healDice}+${healModifier})`, 'heal');
-    const actor = combat.initiativeOrder.find(c => c.entityId === action.submittedBy);
+    const actor = findActor(combat, action, params);
     if (actor) {
       if (params.isBonus) actor.bonusActionSpent = true;
       else actor.actionSpent = true;
@@ -568,18 +603,18 @@ async function resolveAction(combat, action, params, io, room) {
       }
     }
     addLog(combat, `⚔ ${action.submitterName} → ${targetName || '?'}: ${lines.join(', ')} = ${totalDmg} total damage`, 'damage');
-    const actor = combat.initiativeOrder.find(c => c.entityId === action.submittedBy);
+    const actor = findActor(combat, action, params);
     if (actor) actor.actionSpent = true;
   }
 
   else {
-    // Cast spell, improvise, use item, bonus, reaction — log as freetext, DM applies effects manually
+    // Improvise, use ability, bonus action, reaction — log as freetext
     addLog(combat, `✦ ${action.submitterName}: ${action.description}`, 'action');
-    const actor = combat.initiativeOrder.find(c => c.entityId === action.submittedBy);
+    const actor = findActor(combat, action, params);
     if (actor) {
-      if (params.isBonus)   actor.bonusActionSpent = true;
+      if (params.isBonus)      actor.bonusActionSpent = true;
       else if (params.isReaction) actor.reactionSpent = true;
-      else actor.actionSpent = true;
+      else                     actor.actionSpent = true;
     }
   }
 }

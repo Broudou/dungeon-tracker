@@ -44,7 +44,9 @@
   }
 
   $: myTurn    = isDM || (currentCombatant && currentCombatant.entityId === myCharId);
-  $: myChar    = campaign?.players?.find(p => p._id === myCharId);
+  $: myChar    = isDM
+    ? campaign?.players?.find(p => p._id === currentCombatant?.entityId)
+    : campaign?.players?.find(p => p._id === myCharId);
   $: isMonster = currentCombatant?.entityType === 'monster' || currentCombatant?.entityType === 'custom';
   $: charClass = currentCombatant?.class ?? myChar?.class ?? '';
 
@@ -120,10 +122,10 @@
         attackBonus: 0,
       });
     } else {
-      // Log only
+      // No damage — log the ability use
       const description = `${name} uses ${spell.name}`;
       if (isDM) {
-        s.emit('combat:dmNote', { message: `DM: ${description}` });
+        s.emit('combat:dmAction', { actionType: 'improvise', description, params: {}, actorInstanceId: currentCombatant?.instanceId });
       } else {
         s.emit('combat:submitAction', { actionType: 'improvise', description, params: {} });
         waiting = true;
@@ -200,7 +202,13 @@
     }
 
     if (isDM) {
-      s.emit('combat:dmNote', { message: `DM: ${description}` });
+      const dmActionType = selected.type === 'legendary' ? 'improvise' : selected.type;
+      s.emit('combat:dmAction', {
+        actionType:      dmActionType,
+        description,
+        params,
+        actorInstanceId: currentCombatant?.instanceId,
+      });
     } else {
       s.emit('combat:submitAction', { actionType: selected.type, description, params });
       waiting = true;
