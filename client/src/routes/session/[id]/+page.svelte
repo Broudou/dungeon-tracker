@@ -33,10 +33,10 @@
   let allSpells     = [];
   let expandedSpells    = new Set();
   let expandedCreatures = new Set();
-  let spellFilter    = '';
-  let creatureFilter = '';
-  let crFilter       = '';
-  let typeFilter     = '';
+  let spellFilter      = '';
+  let spellClassFilter = '';
+  let creatureFilter   = '';
+  let crFilter         = '';
 
   const SUBCLASSES = {
     Barbarian: { minLevel: 3, options: ['Path of the Berserker', 'Totem Warrior'] },
@@ -106,14 +106,42 @@
       .map(([lvl, list]) => ({ lvl: Number(lvl), list }));
   }
 
-  $: isDM    = !!$auth?.user;
-  $: phase   = sessionData?.phase ?? 'open-world';
-  $: myCharObj = campaignData?.players?.find(p => p._id === myCharId) ?? null;
-  $: creatureTypes = [...new Set(monsterList.map(m => m.type).filter(Boolean))].sort();
+  $: isDM  = !!$auth?.user;
+  $: phase = sessionData?.phase ?? 'open-world';
+
+  $: spellClasses = [...new Set(
+    allSpells.flatMap(s => s.classes?.split(/[,\s]+/).map(c => c.trim()) ?? []).filter(Boolean)
+  )].sort();
+
+  $: filteredSpells = allSpells
+    .filter(s => (!spellClassFilter || (s.classes ?? '').toLowerCase().split(/[,\s]+/).includes(spellClassFilter.toLowerCase())))
+    .filter(s => (!spellFilter || s.name.toLowerCase().includes(spellFilter.toLowerCase())));
+
+  function groupBySchool(spells = []) {
+    const groups = {};
+    for (const s of spells) { const school = s.school ?? 'Unknown'; (groups[school] ??= []).push(s); }
+    return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b)).map(([school, list]) => ({ school, list }));
+  }
+
+  function normalizeCR(cr) {
+    const s = String(cr ?? '?');
+    if (s === '1/8') return '0.125';
+    if (s === '1/4') return '0.25';
+    if (s === '1/2') return '0.5';
+    return s;
+  }
+
+  function parseCRNum(cr) {
+    const s = String(cr ?? '0');
+    if (s === '1/8') return 0.125;
+    if (s === '1/4') return 0.25;
+    if (s === '1/2') return 0.5;
+    return parseFloat(s) || 0;
+  }
+
   $: filteredCreatures = monsterList.filter(m =>
     (!creatureFilter || m.name.toLowerCase().includes(creatureFilter.toLowerCase())) &&
-    (!crFilter || String(m.cr) === crFilter) &&
-    (!typeFilter || m.type === typeFilter)
+    (!crFilter || parseCRNum(m.cr) === parseCRNum(crFilter))
   );
 
   async function handleSpellsUpdate({ detail: { playerId, knownSpells } }) {
@@ -544,15 +572,21 @@
     <div class="ref-search-bar">
       <input class="ref-search" type="search" placeholder="Filter spells…" bind:value={spellFilter} />
     </div>
-    {#each spellsByLevel(allSpells.filter(s => !spellFilter || s.name.toLowerCase().includes(spellFilter.toLowerCase()))) as group (group.lvl)}
+    <div class="spell-class-filters">
+      <button class="spell-class-btn" class:active={spellClassFilter === ''} on:click={() => spellClassFilter = ''}>All</button>
+      {#each spellClasses as cls}
+        <button class="spell-class-btn" class:active={spellClassFilter === cls} on:click={() => spellClassFilter = cls}>{cls}</button>
+      {/each}
+    </div>
+    {#each groupBySchool(filteredSpells) as group (group.school)}
       <div class="ref-group">
-        <div class="ref-group-label">{group.lvl === 0 ? 'Cantrips' : `Level ${group.lvl}`}</div>
+        <div class="ref-group-label">{group.school}</div>
         {#each group.list as spell (spell._id)}
           {@const open = expandedSpells.has(spell._id)}
           <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedSpells.delete(spell._id); else expandedSpells.add(spell._id); expandedSpells = expandedSpells; }}>
             <div class="ref-card-head">
               <span class="ref-card-name">{spell.name}</span>
-              <span class="ref-card-meta">{spell.school}</span>
+              <span class="ref-card-meta">{spell.level === 0 ? 'Cantrip' : `Lv ${spell.level}`}</span>
               <span class="ref-chevron">{open ? '▲' : '▼'}</span>
             </div>
             {#if open}
@@ -596,11 +630,7 @@
       <input class="ref-search" type="search" placeholder="Filter by name…" bind:value={creatureFilter} />
       <select class="ref-filter-select" bind:value={crFilter}>
         <option value="">All CRs</option>
-        {#each CR_VALUES as cr}<option value={cr}>CR {cr}</option>{/each}
-      </select>
-      <select class="ref-filter-select" bind:value={typeFilter}>
-        <option value="">All Types</option>
-        {#each creatureTypes as t}<option value={t}>{t}</option>{/each}
+        {#each CR_VALUES as cr}<option value={cr}>CR {normalizeCR(cr)}</option>{/each}
       </select>
     </div>
     {#each filteredCreatures as creature (creature._id)}
@@ -609,7 +639,7 @@
         <div class="ref-card-head">
           <span class="ref-card-name">{creature.name}</span>
           <div class="ref-card-badges">
-            {#if creature.cr != null}<span class="badge">CR {creature.cr}</span>{/if}
+            {#if creature.cr != null}<span class="badge">CR {normalizeCR(creature.cr)}</span>{/if}
             {#if creature.type}<span class="ref-card-meta">{creature.type}</span>{/if}
           </div>
           <span class="ref-chevron">{open ? '▲' : '▼'}</span>
@@ -1439,8 +1469,28 @@
     flex-direction: column;
     gap: 0;
   }
-  .ref-search-bar { margin-bottom: 0.75rem; }
+  .ref-search-bar { margin-bottom: 0.5rem; }
   .creature-filters { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .spell-class-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.75rem;
+  }
+  .spell-class-btn {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-family: inherit;
+    transition: all 0.1s;
+  }
+  .spell-class-btn:hover { background: var(--surface-3); }
+  .spell-class-btn.active { background: var(--primary, #60a5fa); border-color: var(--primary, #60a5fa); color: #fff; }
   .ref-filter-select {
     padding: 0.375rem 0.625rem;
     background: var(--surface);

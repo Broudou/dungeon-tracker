@@ -30,14 +30,19 @@
     (selectedChar?.knownSpells ?? []).filter(s => s && s.name)
   );
 
-  // Spells available for this character's class (from allSpells reference list)
-  $: classSpells = selectedChar?.class
-    ? allSpells.filter(s => s.classes && s.classes.toLowerCase().split(/[,\s]+/).includes(selectedChar.class.toLowerCase()))
-    : [];
-
-  $: filteredClassSpells = classSpells.filter(s =>
+  $: filteredAllSpells = allSpells.filter(s =>
     !spellSearch || s.name.toLowerCase().includes(spellSearch.toLowerCase())
   );
+
+  function groupBySchool(spells) {
+    const groups = {};
+    for (const s of spells) {
+      const school = s.school ?? 'Unknown';
+      if (!groups[school]) groups[school] = [];
+      groups[school].push(s);
+    }
+    return Object.entries(groups).sort(([a],[b]) => a.localeCompare(b)).map(([school, list]) => ({ school, list }));
+  }
 
   $: knownSpellIds = new Set((selectedChar?.knownSpells ?? []).map(s => s._id ?? s));
 
@@ -232,17 +237,17 @@
             <input
               class="spell-search-input"
               type="search"
-              placeholder="Search {selectedChar.class} spells…"
+              placeholder="Search all spells…"
               bind:value={spellSearch}
             />
-            {#if filteredClassSpells.length === 0}
+            {#if filteredAllSpells.length === 0}
               <p class="empty-state" style="padding: 0.75rem 0; font-size: 0.8rem;">
-                {classSpells.length === 0 ? 'No spells found for this class.' : 'No matches.'}
+                {allSpells.length === 0 ? 'No spells loaded.' : 'No matches.'}
               </p>
             {:else}
               <div class="add-spell-list">
-                {#each groupByLevel(filteredClassSpells) as group (group.lvl)}
-                  <div class="add-spell-group-label">{group.lvl === 0 ? 'Cantrips' : `Level ${group.lvl}`}</div>
+                {#each groupBySchool(filteredAllSpells) as group (group.school)}
+                  <div class="add-spell-group-label">{group.school}</div>
                   {#each group.list as spell (spell._id)}
                     {@const known = knownSpellIds.has(spell._id)}
                     <button
@@ -251,7 +256,7 @@
                       on:click={() => known ? removeSpell(spell._id) : addSpell(spell)}
                     >
                       <span class="add-spell-name">{spell.name}</span>
-                      <span class="add-spell-school">{spell.school ?? ''}</span>
+                      <span class="add-spell-level">{spell.level === 0 ? 'Cantrip' : `Lv ${spell.level}`}</span>
                       <span class="add-spell-toggle">{known ? '✓ Learned' : '+ Learn'}</span>
                     </button>
                   {/each}
@@ -539,9 +544,10 @@
     transition: background 0.1s;
   }
   .add-spell-row:hover { background: var(--surface-3); }
-  .add-spell-row.add-spell-known { opacity: 0.6; }
+  .add-spell-row.add-spell-known { background: #dcfce7; border: 1px solid #86efac; border-radius: var(--radius); }
+  .add-spell-row.add-spell-known:hover { background: #bbf7d0; }
   .add-spell-name  { font-size: 0.8125rem; font-weight: 500; flex: 1; }
-  .add-spell-school { font-size: 0.7rem; color: var(--text-faint); }
+  .add-spell-level { font-size: 0.7rem; color: var(--text-faint); }
   .add-spell-toggle {
     font-size: 0.7rem;
     font-weight: 700;
@@ -549,7 +555,7 @@
     white-space: nowrap;
     flex-shrink: 0;
   }
-  .add-spell-row.add-spell-known .add-spell-toggle { color: var(--text-faint); }
+  .add-spell-row.add-spell-known .add-spell-toggle { color: #166534; }
 
   /* ── Spell groups ────────────────────────────────────────────────────────── */
   .spell-groups { display: flex; flex-direction: column; gap: 1.25rem; }

@@ -1,4 +1,5 @@
 <script>
+  import { onMount, onDestroy } from 'svelte';
   import { getSocket } from '$lib/socket';
 
   export let currentCombatant = null;
@@ -11,33 +12,29 @@
   let selected        = null;
   let subForm         = {};
   let freeText        = '';
-  let showSpellPicker = false;
-  let spellList       = [];
-  let spellsLoading   = false;
+  let showAbilityPicker = false;
 
   const SCHOOL_ABBR = { Abjuration:'Abj', Conjuration:'Con', Divination:'Div', Enchantment:'Enc', Evocation:'Evo', Illusion:'Ill', Necromancy:'Nec', Transmutation:'Tra' };
 
-  const SPELLCASTER_CLASSES = ['Wizard','Sorcerer','Bard','Cleric','Druid','Warlock','Paladin','Ranger','Artificer'];
-
   const BONUS_ACTIONS = [
-    { label:'Second Wind',         type:'heal',        resource:'bonus', isBonus:true, selfOnly:true, healDice:'1d10', sub:'Fighter',    classes:['Fighter'] },
-    { label:'Healing Word',        type:'heal',        resource:'bonus', isBonus:true, healDice:'1d4',                sub:'Bard/Cleric', classes:['Bard','Cleric'] },
-    { label:'Flurry of Blows',     type:'multiAttack', resource:'bonus', isBonus:true, count:2,                       sub:'Monk',        classes:['Monk'] },
-    { label:'Divine Smite',        type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Paladin',     classes:['Paladin'] },
-    { label:'Rage',                type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Barbarian',   classes:['Barbarian'] },
-    { label:'Cunning Action',      type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Rogue',       classes:['Rogue'] },
-    { label:'Misty Step',          type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Warlock/Wiz', classes:['Warlock','Wizard','Sorcerer'] },
-    { label:'Wild Shape',          type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Druid',       classes:['Druid'] },
-    { label:"Hex / Hunter's Mark", type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Wlk/Rgr',     classes:['Warlock','Ranger'] },
-    { label:'Bardic Inspiration',  type:'improvise',   resource:'bonus', isBonus:true,                               sub:'Bard',        classes:['Bard'] },
+    { label:'Second Wind',         type:'heal',        resource:'bonus', isBonus:true, selfOnly:true, healDice:'1d10', classes:['Fighter'] },
+    { label:'Healing Word',        type:'heal',        resource:'bonus', isBonus:true, healDice:'1d4',                classes:['Bard','Cleric'],  requiresSpell:'Healing Word' },
+    { label:'Flurry of Blows',     type:'multiAttack', resource:'bonus', isBonus:true, count:2,                       classes:['Monk'] },
+    { label:'Divine Smite',        type:'improvise',   resource:'bonus', isBonus:true,                               classes:['Paladin'] },
+    { label:'Rage',                type:'improvise',   resource:'bonus', isBonus:true,                               classes:['Barbarian'] },
+    { label:'Cunning Action',      type:'improvise',   resource:'bonus', isBonus:true,                               classes:['Rogue'] },
+    { label:'Misty Step',          type:'improvise',   resource:'bonus', isBonus:true,                               classes:['Warlock','Wizard','Sorcerer'], requiresSpell:'Misty Step' },
+    { label:'Wild Shape',          type:'improvise',   resource:'bonus', isBonus:true,                               classes:['Druid'] },
+    { label:"Hex / Hunter's Mark", type:'improvise',   resource:'bonus', isBonus:true,                               classes:['Warlock','Ranger'], requiresSpell:"Hunter's Mark" },
+    { label:'Bardic Inspiration',  type:'improvise',   resource:'bonus', isBonus:true,                               classes:['Bard'] },
   ];
 
   const REACTIONS = [
-    { label:'Shield',           type:'improvise', resource:'reaction', isReaction:true, sub:'Wizard',  classes:['Wizard','Sorcerer'] },
-    { label:'Hellish Rebuke',   type:'improvise', resource:'reaction', isReaction:true, sub:'Warlock', classes:['Warlock'] },
-    { label:'Counterspell',     type:'improvise', resource:'reaction', isReaction:true, sub:'Caster',  classes:['Wizard','Sorcerer','Bard','Cleric','Druid','Warlock'] },
-    { label:'Absorb Elements',  type:'improvise', resource:'reaction', isReaction:true, sub:'Various', classes:[] },
-    { label:'Opportunity Attack',type:'attack',   resource:'reaction', isReaction:true, sub:'All',     classes:[] },
+    { label:'Shield',            type:'improvise', resource:'reaction', isReaction:true, classes:['Wizard','Sorcerer'],                                         requiresSpell:'Shield' },
+    { label:'Hellish Rebuke',    type:'improvise', resource:'reaction', isReaction:true, classes:['Warlock'],                                                    requiresSpell:'Hellish Rebuke' },
+    { label:'Counterspell',      type:'improvise', resource:'reaction', isReaction:true, classes:['Wizard','Sorcerer','Bard','Cleric','Druid','Warlock'],        requiresSpell:'Counterspell' },
+    { label:'Absorb Elements',   type:'improvise', resource:'reaction', isReaction:true, classes:[],                                                             requiresSpell:'Absorb Elements' },
+    { label:'Opportunity Attack', type:'attack',   resource:'reaction', isReaction:true, classes:[] },
   ];
 
   function matchesClass(classes, charClass) {
@@ -48,12 +45,23 @@
 
   $: myTurn    = isDM || (currentCombatant && currentCombatant.entityId === myCharId);
   $: myChar    = campaign?.players?.find(p => p._id === myCharId);
-  $: isMonster = myTurn && (currentCombatant?.entityType === 'monster' || currentCombatant?.entityType === 'custom');
+  $: isMonster = currentCombatant?.entityType === 'monster' || currentCombatant?.entityType === 'custom';
   $: charClass = currentCombatant?.class ?? myChar?.class ?? '';
-  $: canCastSpells = !isMonster && SPELLCASTER_CLASSES.some(c => c.toLowerCase() === charClass.toLowerCase());
 
-  $: filteredBonusActions  = BONUS_ACTIONS.filter(a => matchesClass(a.classes, charClass));
-  $: filteredReactions     = REACTIONS.filter(a => matchesClass(a.classes, charClass));
+  $: knownSpells     = (myChar?.knownSpells ?? []).filter(s => s && s.name);
+  $: knownSpellNames = new Set(knownSpells.map(s => s.name?.toLowerCase()).filter(Boolean));
+
+  $: filteredBonusActions = BONUS_ACTIONS.filter(a => {
+    if (!matchesClass(a.classes, charClass)) return false;
+    if (a.requiresSpell) return knownSpellNames.has(a.requiresSpell.toLowerCase());
+    return true;
+  });
+
+  $: filteredReactions = REACTIONS.filter(a => {
+    if (!matchesClass(a.classes, charClass)) return false;
+    if (a.requiresSpell) return knownSpellNames.has(a.requiresSpell.toLowerCase());
+    return true;
+  });
 
   $: resources = myTurn && currentCombatant ? {
     action:   !currentCombatant.actionSpent,
@@ -63,9 +71,10 @@
 
   $: targetOptions = combatants.filter(c => !c.isDefeated);
 
+  // Group known spells by level for ability picker
   $: spellsByLevel = (() => {
     const g = {};
-    for (const s of spellList) { const l = s.level ?? 0; (g[l] ??= []).push(s); }
+    for (const s of knownSpells) { const l = s.level ?? 0; (g[l] ??= []).push(s); }
     return Object.entries(g).sort(([a],[b]) => Number(a) - Number(b));
   })();
 
@@ -75,29 +84,50 @@
   $: monsterLegendaryActions = currentCombatant?.legendaryActions ?? [];
   $: monsterTraits           = currentCombatant?.traits           ?? [];
 
-  async function openSpellPicker() {
-    showSpellPicker = true;
-    if (spellList.length) return;
-    spellsLoading = true;
-    try {
-      const classParam = charClass ? `&class=${encodeURIComponent(charClass)}` : '';
-      const res = await fetch(`/api/spells?limit=200${classParam}`, { credentials: 'include' });
-      if (res.ok) spellList = await res.json();
-    } catch { /* non-fatal */ }
-    spellsLoading = false;
+  // Reset waiting when combat state updates (action resolved by DM)
+  $: if (waiting && currentCombatant) {
+    if (currentCombatant.actionSpent || currentCombatant.bonusActionSpent || currentCombatant.reactionSpent) {
+      waiting = false;
+    }
   }
 
-  function pickSpell(spell) {
-    showSpellPicker = false;
+  // Also listen for explicit actionResolved event
+  let _cleanupSocket;
+  onMount(() => {
+    const s = getSocket();
+    if (s) {
+      const handler = ({ status }) => { if (status === 'approved' || status === 'rejected') waiting = false; };
+      s.on('combat:actionResolved', handler);
+      _cleanupSocket = () => s.off('combat:actionResolved', handler);
+    }
+  });
+  onDestroy(() => _cleanupSocket?.());
+
+  function pickAbility(spell) {
+    showAbilityPicker = false;
     const s = getSocket();
     if (!s) return;
     const name = currentCombatant?.name ?? 'Unknown';
-    const description = `${name} cast ${spell.name}`;
-    if (isDM) {
-      s.emit('combat:dmNote', { message: `DM: ${description}` });
+
+    if (spell.damageDice) {
+      // Treat as attack action
+      selectAction({
+        label:      spell.name,
+        type:       'attack',
+        resource:   'action',
+        damageDice: spell.damageDice,
+        damageType: spell.damageType ?? '',
+        attackBonus: 0,
+      });
     } else {
-      s.emit('combat:submitAction', { actionType: 'cast', description, params: { spellName: spell.name } });
-      waiting = true;
+      // Log only
+      const description = `${name} uses ${spell.name}`;
+      if (isDM) {
+        s.emit('combat:dmNote', { message: `DM: ${description}` });
+      } else {
+        s.emit('combat:submitAction', { actionType: 'improvise', description, params: {} });
+        waiting = true;
+      }
     }
   }
 
@@ -249,15 +279,6 @@
           </select>
         </div>
 
-      {:else if selected.type === 'cast'}
-        <div class="field-sm">
-          <label>Spell name</label>
-          <input bind:value={freeText} placeholder="Spell name…" />
-        </div>
-        {#if canCastSpells}
-          <button class="btn btn-ghost btn-sm" on:click={openSpellPicker} style="align-self: flex-start;">Browse spells</button>
-        {/if}
-
       {:else}
         <div class="field-sm"><label>Description</label><input bind:value={freeText} placeholder="Describe the action…" /></div>
       {/if}
@@ -267,20 +288,46 @@
       </button>
     </div>
 
-  {:else if isMonster}
-    <!-- Monster / custom creature action chooser -->
+  {:else}
+    <!-- Unified action chooser (players and monsters) -->
     <div class="chooser">
       <div class="resource-row">
         <span class="res" class:spent={!resources.action}>Action</span>
+        <span class="res" class:spent={!resources.bonus}>Bonus</span>
         <span class="res" class:spent={!resources.reaction}>Reaction</span>
       </div>
 
-      {#if monsterActions.length}
+      <!-- Basic actions (always shown) -->
+      <div class="action-section">
+        <p class="section-head">Actions</p>
+        <div class="action-grid">
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => selectAction({ label:'Attack', type:'attack', resource:'action' })}>Attack</button>
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => showAbilityPicker = true}>Use Ability</button>
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => announceAction('is disengaging')}>Disengage</button>
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => announceAction('is dodging')}>Dodge</button>
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => selectAction({ label:'Help', type:'help', resource:'action' })}>Help</button>
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => announceAction('is trying to hide')}>Hide</button>
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => announceAction('is readying an action')}>Ready</button>
+          <button class="action-btn" class:disabled={!isDM && !resources.action}
+            on:click={() => announceAction('is searching')}>Search</button>
+        </div>
+      </div>
+
+      <!-- Monster-specific actions -->
+      {#if isMonster && monsterActions.length}
         <div class="action-section">
-          <p class="section-head">Actions</p>
+          <p class="section-head">Creature Actions</p>
           <div class="action-grid">
             {#each monsterActions as a}
               <button class="action-btn" class:has-attack={!!(a.damageDice || a.attackBonus != null)}
+                class:disabled={!isDM && !resources.action}
                 on:click={() => selectMonsterAction(a)}>
                 {a.name}
                 {#if a.damageDice}<span class="action-sub">{a.damageDice} {a.damageType || ''}</span>{/if}
@@ -290,12 +337,13 @@
         </div>
       {/if}
 
-      {#if monsterReactions.length}
+      <!-- Monster reactions -->
+      {#if isMonster && monsterReactions.length}
         <div class="action-section">
           <p class="section-head">Reactions</p>
           <div class="action-grid">
             {#each monsterReactions as a}
-              <button class="action-btn action-btn-sm" class:disabled={!resources.reaction}
+              <button class="action-btn action-btn-sm" class:disabled={!isDM && !resources.reaction}
                 on:click={() => selectMonsterReaction(a)}>
                 {a.name}
               </button>
@@ -304,7 +352,8 @@
         </div>
       {/if}
 
-      {#if monsterLegendaryActions.length}
+      <!-- Monster legendary actions -->
+      {#if isMonster && monsterLegendaryActions.length}
         <div class="action-section">
           <p class="section-head">Legendary Actions</p>
           <div class="action-grid">
@@ -317,7 +366,8 @@
         </div>
       {/if}
 
-      {#if monsterTraits.length}
+      <!-- Monster traits (read-only) -->
+      {#if isMonster && monsterTraits.length}
         <div class="action-section">
           <p class="section-head">Traits</p>
           <div class="trait-list">
@@ -331,64 +381,28 @@
         </div>
       {/if}
 
-      {#if !monsterActions.length && !monsterTraits.length}
-        <p class="text-faint text-sm" style="padding: 0.5rem 0;">No actions stored for this creature.</p>
-      {/if}
-    </div>
-
-  {:else}
-    <!-- Player action chooser -->
-    <div class="chooser">
-      <div class="resource-row">
-        <span class="res" class:spent={!resources.action}>Action</span>
-        <span class="res" class:spent={!resources.bonus}>Bonus</span>
-        <span class="res" class:spent={!resources.reaction}>Reaction</span>
-      </div>
-
-      <div class="action-section">
-        <p class="section-head">Actions</p>
-        <div class="action-grid">
-          <button class="action-btn" class:disabled={!resources.action}
-            on:click={() => selectAction({ label:'Attack', type:'attack', resource:'action' })}>Attack</button>
-          <button class="action-btn"
-            on:click={() => selectAction({ label:'Cast Spell', type:'cast', resource:'action' })}>Cast Spell</button>
-          <button class="action-btn"
-            on:click={() => announceAction('is disengaging')}>Disengage</button>
-          <button class="action-btn"
-            on:click={() => announceAction('is dodging')}>Dodge</button>
-          <button class="action-btn"
-            on:click={() => selectAction({ label:'Help', type:'help', resource:'action' })}>Help</button>
-          <button class="action-btn"
-            on:click={() => announceAction('is trying to hide')}>Hide</button>
-          <button class="action-btn"
-            on:click={() => announceAction('is readying an action')}>Ready</button>
-          <button class="action-btn"
-            on:click={() => announceAction('is searching')}>Search</button>
-        </div>
-      </div>
-
-      {#if filteredBonusActions.length}
+      <!-- Player bonus actions (class-filtered + spell-filtered) -->
+      {#if !isMonster && filteredBonusActions.length}
         <div class="action-section">
           <p class="section-head">Bonus Actions</p>
           <div class="action-grid">
             {#each filteredBonusActions as a}
-              <button class="action-btn action-btn-sm" class:disabled={!resources.bonus} on:click={() => selectAction(a)}>
+              <button class="action-btn action-btn-sm" class:disabled={!isDM && !resources.bonus} on:click={() => selectAction(a)}>
                 {a.label}
-                <span class="action-sub">{a.sub}</span>
               </button>
             {/each}
           </div>
         </div>
       {/if}
 
+      <!-- Player reactions (class-filtered + spell-filtered) -->
       {#if filteredReactions.length}
         <div class="action-section">
           <p class="section-head">Reactions</p>
           <div class="action-grid">
             {#each filteredReactions as a}
-              <button class="action-btn action-btn-sm" class:disabled={!resources.reaction} on:click={() => selectAction(a)}>
+              <button class="action-btn action-btn-sm" class:disabled={!isDM && !resources.reaction} on:click={() => selectAction(a)}>
                 {a.label}
-                <span class="action-sub">{a.sub}</span>
               </button>
             {/each}
           </div>
@@ -398,28 +412,27 @@
   {/if}
 </div>
 
-<!-- Spell picker overlay -->
-{#if showSpellPicker}
-  <div class="overlay-backdrop" on:click={() => showSpellPicker = false} role="presentation"></div>
+<!-- Ability picker overlay (learned spells) -->
+{#if showAbilityPicker}
+  <div class="overlay-backdrop" on:click={() => showAbilityPicker = false} role="presentation"></div>
   <div class="spell-panel">
     <div class="spell-head">
-      <span>{myChar?.name ?? currentCombatant?.name ?? 'Spellbook'}</span>
-      <button class="btn btn-ghost btn-sm" on:click={() => showSpellPicker = false}>✕</button>
+      <span>{myChar?.name ?? currentCombatant?.name ?? 'Abilities'} — Use Ability</span>
+      <button class="btn btn-ghost btn-sm" on:click={() => showAbilityPicker = false}>✕</button>
     </div>
-    {#if spellsLoading}
-      <p class="text-muted text-sm" style="padding: 1rem;">Loading spells…</p>
-    {:else if spellList.length === 0}
-      <p class="text-muted text-sm" style="padding: 1rem;">No spells found for this character.</p>
+    {#if knownSpells.length === 0}
+      <p class="text-muted text-sm" style="padding: 1rem;">No learned spells found.</p>
     {:else}
       <div class="spell-scroll">
         {#each spellsByLevel as [level, spells]}
           <p class="spell-level">{Number(level) === 0 ? 'Cantrips' : `Level ${level}`}</p>
           <div class="spell-grid">
             {#each spells as spell}
-              <button class="spell-tile" on:click={() => pickSpell(spell)}>
+              <button class="spell-tile" class:spell-attack={!!spell.damageDice} on:click={() => pickAbility(spell)}>
                 <span class="spell-school">{SCHOOL_ABBR[spell.school] ?? spell.school?.slice(0,3) ?? '?'}</span>
                 <span class="spell-name">{spell.name}</span>
-                <span class="spell-cast">{spell.castingTime ?? '1 action'}</span>
+                {#if spell.damageDice}<span class="spell-cast">{spell.damageDice}</span>
+                {:else}<span class="spell-cast">{spell.castingTime ?? '1 action'}</span>{/if}
                 {#if spell.concentration}<span class="spell-conc" title="Concentration">C</span>{/if}
               </button>
             {/each}
@@ -466,7 +479,6 @@
   }
 
   .chooser { display: flex; flex-direction: column; gap: 0.75rem; }
-  .action-section {}
   .section-head {
     font-size: 0.7rem;
     font-weight: 600;
@@ -496,7 +508,7 @@
     transition: all 0.1s;
   }
   .action-btn:hover:not(.disabled) { border-color: var(--border-strong); background: var(--surface); }
-  .action-btn.disabled { opacity: 0.35; cursor: not-allowed; }
+  .action-btn.disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
   .action-btn.has-attack { border-color: var(--accent, #7c6af7); }
   .action-btn-sm { font-size: 0.75rem; padding: 0.2rem 0.55rem; }
   .action-sub { font-size: 0.65rem; color: var(--text-faint); font-style: italic; }
@@ -527,7 +539,7 @@
   .field-sm input, .field-sm select { font-size: 0.8125rem; }
   .field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.375rem; }
 
-  /* Spell picker */
+  /* Ability picker */
   .overlay-backdrop { position: fixed; inset: 0; z-index: 200; }
   .spell-panel {
     position: fixed;
@@ -583,6 +595,7 @@
     transition: all 0.1s;
   }
   .spell-tile:hover { border-color: var(--border-strong); background: var(--surface); }
+  .spell-tile.spell-attack { border-color: var(--accent, #7c6af7); }
   .spell-school { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
   .spell-name   { font-size: 0.72rem; font-weight: 600; color: var(--text); line-height: 1.2; word-break: break-word; }
   .spell-cast   { font-size: 0.62rem; color: var(--text-muted); font-style: italic; }
