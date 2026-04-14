@@ -16,6 +16,11 @@
 
   const SCHOOL_ABBR = { Abjuration:'Abj', Conjuration:'Con', Divination:'Div', Enchantment:'Enc', Evocation:'Evo', Illusion:'Ill', Necromancy:'Nec', Transmutation:'Tra' };
 
+  function profBonus(level) {
+    // D&D 5e: +2 at levels 1-4, +3 at 5-8, +4 at 9-12, +5 at 13-16, +6 at 17-20
+    return 2 + Math.floor((Math.max(1, level ?? 1) - 1) / 4);
+  }
+
   const BONUS_ACTIONS = [
     { label:'Second Wind',         type:'heal',        resource:'bonus', isBonus:true, selfOnly:true, healDice:'1d10', classes:['Fighter'] },
     { label:'Healing Word',        type:'heal',        resource:'bonus', isBonus:true, healDice:'1d4',                classes:['Bard','Cleric'],  requiresSpell:'Healing Word' },
@@ -111,21 +116,33 @@
     if (!s) return;
     const name = currentCombatant?.name ?? 'Unknown';
 
-    if (spell.damageDice) {
-      // Treat as attack action
+    if (spell.saveAbility) {
+      // Saving throw spell — open savingThrow sub-form
       selectAction({
-        label:      spell.name,
-        type:       'attack',
-        resource:   'action',
-        damageDice: spell.damageDice,
-        damageType: spell.damageType ?? '',
+        label:       spell.name,
+        type:        'savingThrow',
+        resource:    'action',
+        saveDC:      spell.saveDC ?? 13,
+        saveAbility: spell.saveAbility,
+        damageDice:  spell.damageDice ?? '',
+        damageType:  spell.damageType ?? '',
+        halfOnSave:  spell.halfOnSave ?? false,
+      });
+    } else if (spell.damageDice) {
+      // Direct damage spell — attack roll
+      selectAction({
+        label:       spell.name,
+        type:        'attack',
+        resource:    'action',
+        damageDice:  spell.damageDice,
+        damageType:  spell.damageType ?? '',
         attackBonus: 0,
       });
     } else {
-      // No damage — log the ability use
+      // Utility / no-damage spell — log immediately
       const description = `${name} uses ${spell.name}`;
       if (isDM) {
-        s.emit('combat:dmAction', { actionType: 'improvise', description, params: {}, actorInstanceId: currentCombatant?.instanceId });
+        s.emit('combat:dmAction', { actionType: 'improvise', description, params: { actorInstanceId: currentCombatant?.instanceId }, actorInstanceId: currentCombatant?.instanceId });
       } else {
         s.emit('combat:submitAction', { actionType: 'improvise', description, params: {} });
         waiting = true;
@@ -179,6 +196,13 @@
     if (a.attackBonus != null) subForm.attackBonus = a.attackBonus;
     if (a.damageDice)  subForm.damageDice  = a.damageDice;
     if (a.damageType)  subForm.damageType  = a.damageType;
+    if (a.saveDC      != null) subForm.saveDC      = a.saveDC;
+    if (a.saveAbility)          subForm.saveAbility  = a.saveAbility;
+    if (a.halfOnSave  != null) subForm.halfOnSave   = a.halfOnSave;
+    if (a.type === 'attack') {
+      subForm.profBonusValue   = profBonus(currentCombatant?.level ?? 1);
+      subForm.includeProfBonus = false;
+    }
   }
 
   function cancel() { selected = null; waiting = false; freeText = ''; }
@@ -189,8 +213,17 @@
     let description = selected.label;
     const params = { ...subForm, isBonus: !!selected.isBonus, isReaction: !!selected.isReaction };
 
+    // Apply proficiency bonus to attack if checked
+    if (selected.type === 'attack' && params.includeProfBonus) {
+      params.attackBonus = (parseInt(params.attackBonus, 10) || 0) + (parseInt(params.profBonusValue, 10) || 0);
+    }
+    delete params.includeProfBonus;
+    delete params.profBonusValue;
+
     if (selected.type === 'attack') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${subForm.damageDice || '1d8'} ${subForm.damageType || ''})`;
+    } else if (selected.type === 'savingThrow') {
+      description = `${selected.label} → ${subForm.targetName || 'target'} (DC ${subForm.saveDC} ${subForm.saveAbility} save)`;
     } else if (selected.type === 'heal') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${selected.healDice || subForm.healDice || '1d8'}+${subForm.healModifier || 0})`;
       params.healDice = selected.healDice || subForm.healDice || '1d8';
@@ -259,6 +292,31 @@
           <div class="field-sm"><label>Damage Dice</label><input bind:value={subForm.damageDice} placeholder="1d8" /></div>
           <div class="field-sm"><label>Damage Bonus</label><input type="number" bind:value={subForm.damageBonus} placeholder="0" /></div>
           <div class="field-sm"><label>Damage Type</label><input bind:value={subForm.damageType} placeholder="slashing" /></div>
+        </div>
+        <div class="prof-row">
+          <input type="checkbox" id="inclProf" bind:checked={subForm.includeProfBonus} />
+          <label for="inclProf">Prof. Bonus</label>
+          <input type="number" bind:value={subForm.profBonusValue} class="prof-input" />
+        </div>
+
+      {:else if selected.type === 'savingThrow'}
+        <div class="field-sm">
+          <label>Target</label>
+          <select bind:value={subForm.targetInstanceId}
+            on:change={e => { const t = targetOptions.find(c => c.instanceId === e.target.value); subForm.targetName = t?.name; }}>
+            <option value="">— select target —</option>
+            {#each targetOptions as c}<option value={c.instanceId}>{c.name}</option>{/each}
+          </select>
+        </div>
+        <div class="field-row-2">
+          <div class="field-sm"><label>Save DC</label><input type="number" bind:value={subForm.saveDC} placeholder="13" /></div>
+          <div class="field-sm"><label>Save Ability</label><input bind:value={subForm.saveAbility} readonly class="readonly-input" /></div>
+          <div class="field-sm"><label>Damage Dice</label><input bind:value={subForm.damageDice} placeholder="8d6" /></div>
+          <div class="field-sm"><label>Damage Type</label><input bind:value={subForm.damageType} placeholder="fire" /></div>
+        </div>
+        <div class="prof-row">
+          <input type="checkbox" id="halfOnSave" bind:checked={subForm.halfOnSave} />
+          <label for="halfOnSave">Half damage on successful save</label>
         </div>
 
       {:else if selected.type === 'heal'}
@@ -416,6 +474,16 @@
           </div>
         </div>
       {/if}
+
+      <!-- End Turn (players only) -->
+      {#if !isDM}
+        <div class="action-section" style="margin-top:auto; padding-top:0.5rem; border-top:1px solid var(--border);">
+          <button class="btn btn-secondary btn-sm" style="width:100%;"
+            on:click={() => getSocket()?.emit('combat:nextTurn')}>
+            End Turn
+          </button>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -436,7 +504,7 @@
           <p class="spell-level">{Number(level) === 0 ? 'Cantrips' : `Level ${level}`}</p>
           <div class="spell-grid">
             {#each spells as spell}
-              <button class="spell-tile" class:spell-attack={!!spell.damageDice} on:click={() => pickAbility(spell)}>
+              <button class="spell-tile" class:spell-attack={!!spell.damageDice && !spell.saveAbility} class:spell-save={!!spell.saveAbility} on:click={() => pickAbility(spell)}>
                 <span class="spell-school">{SCHOOL_ABBR[spell.school] ?? spell.school?.slice(0,3) ?? '?'}</span>
                 <span class="spell-name">{spell.name}</span>
                 {#if spell.damageDice}<span class="spell-cast">{spell.damageDice}</span>
@@ -604,6 +672,17 @@
   }
   .spell-tile:hover { border-color: var(--border-strong); background: var(--surface); }
   .spell-tile.spell-attack { border-color: var(--accent, #7c6af7); }
+  .spell-tile.spell-save   { border-color: var(--warning, #f59e0b); }
+
+  .prof-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8125rem;
+  }
+  .prof-row label { cursor: pointer; color: var(--text-muted); }
+  .prof-input { width: 52px; font-size: 0.8125rem; }
+  .readonly-input { background: var(--surface-2); cursor: not-allowed; }
   .spell-school { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
   .spell-name   { font-size: 0.72rem; font-weight: 600; color: var(--text); line-height: 1.2; word-break: break-word; }
   .spell-cast   { font-size: 0.62rem; color: var(--text-muted); font-style: italic; }

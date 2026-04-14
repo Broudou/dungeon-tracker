@@ -26,18 +26,15 @@
     return parseFloat(cr) || 0;
   }
 
-  function matchesCR(m) {
+  $: filtered = monsterList.filter(m => {
+    const matchSearch = !searchText || m.name.toLowerCase().includes(searchText.toLowerCase());
+    if (!matchSearch) return false;
     if (filterCR === 'all') return true;
     const crNum = parseCR(m.cr?.toString() ?? '');
     if (filterCR === '6-9')   return crNum >= 6  && crNum <= 9;
     if (filterCR === '10-15') return crNum >= 10 && crNum <= 15;
     if (filterCR === '16+')   return crNum >= 16;
     return crNum === parseCR(filterCR);
-  }
-
-  $: filtered = monsterList.filter(m => {
-    const matchSearch = !searchText || m.name.toLowerCase().includes(searchText.toLowerCase());
-    return matchSearch && matchesCR(m);
   }).slice(0, 40);
 
   function togglePlayer(id) {

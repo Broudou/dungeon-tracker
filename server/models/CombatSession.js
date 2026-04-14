@@ -39,6 +39,7 @@ const CombatantSchema = new mongoose.Schema({
     successes: { type: Number, default: 0 },
     failures:  { type: Number, default: 0 },
   },
+  stats: mongoose.Schema.Types.Mixed,   // raw ability scores { STR, DEX, CON, INT, WIS, CHA }
   // Monster/custom creature abilities (denormalised from source document)
   actions:          [ActionEntrySchema],
   reactions:        [ActionEntrySchema],

@@ -84,6 +84,7 @@ function registerCombatHandlers(io, socket, room, session) {
           level:      player.level,
           class:      player.class,
           race:       player.race,
+          stats:      player.stats ?? {},
         });
       }
 
@@ -104,6 +105,7 @@ function registerCombatHandlers(io, socket, room, session) {
             maxHp:      monster.hp?.average ?? 0,
             ac:         monster.AC ?? 10,
             cr:         monster.cr,
+            stats:      monster.stats ?? {},
             actions:          monster.actions          ?? [],
             reactions:        monster.reactions        ?? [],
             traits:           monster.traits           ?? [],
@@ -127,6 +129,7 @@ function registerCombatHandlers(io, socket, room, session) {
           maxHp:      creature.hp?.max ?? 10,
           ac:         creature.ac ?? 10,
           cr:         creature.cr,
+          stats:      creature.stats ?? {},
           actions:  creature.actions ?? [],
           traits:   creature.traits  ?? [],
         });
@@ -203,10 +206,14 @@ function registerCombatHandlers(io, socket, room, session) {
 
   // ── Next turn ─────────────────────────────────────────────────────────────────
   socket.on('combat:nextTurn', async () => {
-    if (!socket.isDM) return;
     try {
       const combat = await CombatSession.findOne({ sessionId: session._id });
       if (!combat || combat.state !== 'active') return;
+
+      // Allow DM, or the player whose turn it currently is
+      const activeCombatant = combat.initiativeOrder[combat.currentTurnIndex];
+      const isActiveTurn = activeCombatant && activeCombatant.entityId === socket.characterId;
+      if (!socket.isDM && !isActiveTurn) return;
 
       const order = combat.initiativeOrder;
       let next = combat.currentTurnIndex;
@@ -424,7 +431,7 @@ function registerCombatHandlers(io, socket, room, session) {
         submitterName: socket.displayName,
         actionType,
         description,
-        params: params || {},
+        params: { ...(params || {}), actorInstanceId: current.instanceId },
         status: 'pending',
         submittedAt: new Date(),
       };
@@ -604,6 +611,48 @@ async function resolveAction(combat, action, params, io, room) {
     }
     addLog(combat, `⚔ ${action.submitterName} → ${targetName || '?'}: ${lines.join(', ')} = ${totalDmg} total damage`, 'damage');
     const actor = findActor(combat, action, params);
+    if (actor) actor.actionSpent = true;
+  }
+
+  else if (actionType === 'savingThrow') {
+    const {
+      saveDC = 13, saveAbility = 'DEX', damageDice = '', damageBonus = 0,
+      damageType = '', halfOnSave = false, targetInstanceId, targetName,
+    } = params;
+
+    const target = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
+    const actor  = findActor(combat, action, params);
+
+    const abilityScore = target?.stats?.[saveAbility] ?? 10;
+    const abMod    = modifier(abilityScore);
+    const saveRoll = Math.floor(Math.random() * 20) + 1;
+    const saveTotal = saveRoll + abMod;
+    const saved = saveTotal >= saveDC;
+
+    let finalDamage = 0;
+    if (damageDice) {
+      const raw = Math.max(0, rollDice(damageDice).total + parseInt(damageBonus, 10));
+      finalDamage = !saved ? raw : (halfOnSave ? Math.floor(raw / 2) : 0);
+    }
+
+    if (target && finalDamage > 0) {
+      target.currentHp = Math.max(0, target.currentHp - finalDamage);
+      if (target.currentHp === 0) {
+        target.isDefeated = true;
+        addLog(combat, `💀 ${target.name} drops to 0 HP`, 'condition');
+      }
+    }
+
+    const outcome = saved
+      ? (halfOnSave ? `saved — ${finalDamage} ${damageType} (half)` : 'saved — no damage')
+      : `failed — ${finalDamage} ${damageType} damage`;
+
+    addLog(combat,
+      `✦ ${action.submitterName} → DC ${saveDC} ${saveAbility} save (${targetName || '?'}): ` +
+      `rolled ${saveRoll}${abMod >= 0 ? '+' : ''}${abMod}=${saveTotal} — ${outcome}`,
+      finalDamage > 0 ? 'damage' : 'action'
+    );
+
     if (actor) actor.actionSpent = true;
   }
 
