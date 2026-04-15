@@ -1,5 +1,14 @@
 const mongoose = require('mongoose');
 
+const DotEffectSchema = new mongoose.Schema({
+  effectId:         { type: String, required: true },
+  spellName:        String,
+  damageDice:       String,
+  damageType:       String,
+  sourceInstanceId: String,
+  appliedRound:     Number,
+}, { _id: false });
+
 const TagSchema = new mongoose.Schema({
   label: String,
   color: { type: String, enum: ['red', 'green', 'blue', 'yellow', 'purple'], default: 'yellow' },
@@ -39,6 +48,7 @@ const CombatantSchema = new mongoose.Schema({
     successes: { type: Number, default: 0 },
     failures:  { type: Number, default: 0 },
   },
+  dotEffects: { type: [DotEffectSchema], default: [] },
   stats: mongoose.Schema.Types.Mixed,   // raw ability scores { STR, DEX, CON, INT, WIS, CHA }
   // Monster/custom creature abilities (denormalised from source document)
   actions:          [ActionEntrySchema],

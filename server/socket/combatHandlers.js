@@ -346,6 +346,26 @@ function registerCombatHandlers(io, socket, room, session) {
     }
   });
 
+  // ── DoT removal (DM only) ────────────────────────────────────────────────────
+  socket.on('combat:removeDot', async ({ instanceId, effectId }) => {
+    if (!socket.isDM) return;
+    try {
+      const combat = await CombatSession.findOne({ sessionId: session._id });
+      if (!combat) return;
+      const combatant = combat.initiativeOrder.find(c => c.instanceId === instanceId);
+      if (!combatant) return;
+      const before = (combatant.dotEffects || []).length;
+      combatant.dotEffects = (combatant.dotEffects || []).filter(d => d.effectId !== effectId);
+      if (combatant.dotEffects.length < before) {
+        addLog(combat, `DoT effect removed from ${combatant.name}`, 'condition');
+      }
+      await combat.save();
+      io.to(room).emit('combat:state', combat);
+    } catch (err) {
+      socket.emit('error', { message: err.message });
+    }
+  });
+
   // ── Resource spent/restore (DM direct) ───────────────────────────────────────
   socket.on('combat:setResource', async ({ instanceId, resource, spent }) => {
     if (!socket.isDM) return;
@@ -653,6 +673,50 @@ async function resolveAction(combat, action, params, io, room) {
       finalDamage > 0 ? 'damage' : 'action'
     );
 
+    if (actor) actor.actionSpent = true;
+  }
+
+  else if (actionType === 'autoHit') {
+    // Auto-hit damage — no attack roll needed (e.g. Magic Missile)
+    const { damageDice = '1d4', damageBonus = 0, damageType = '', targetInstanceId, targetName } = params;
+    const dmg      = rollDice(damageDice);
+    const totalDmg = Math.max(0, dmg.total + parseInt(damageBonus, 10));
+    const target   = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
+    if (target && totalDmg > 0) {
+      target.currentHp = Math.max(0, target.currentHp - totalDmg);
+      if (target.currentHp === 0) {
+        target.isDefeated = true;
+        addLog(combat, `💀 ${target.name} drops to 0 HP`, 'condition');
+      }
+    }
+    addLog(combat,
+      `✦ ${action.submitterName} → ${targetName || '?'}: ${totalDmg} ${damageType} damage (auto-hit: ${damageDice})`,
+      'damage'
+    );
+    const actor = findActor(combat, action, params);
+    if (actor) actor.actionSpent = true;
+  }
+
+  else if (actionType === 'cast') {
+    // Spell cast — logs the cast and optionally applies a DoT marker to the target
+    const { spellName, isDot = false, damageDice, damageType = '', targetInstanceId, targetName } = params;
+    addLog(combat, `✦ ${action.submitterName} casts ${spellName || action.description}`, 'action');
+    if (isDot && targetInstanceId) {
+      const target = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
+      if (target) {
+        if (!target.dotEffects) target.dotEffects = [];
+        target.dotEffects.push({
+          effectId:         uuidv4(),
+          spellName:        spellName || '',
+          damageDice:       damageDice || '',
+          damageType:       damageType || '',
+          sourceInstanceId: params.actorInstanceId || '',
+          appliedRound:     combat.round,
+        });
+        addLog(combat, `🔥 ${spellName} DoT applied to ${targetName || '?'}`, 'condition');
+      }
+    }
+    const actor = findActor(combat, action, params);
     if (actor) actor.actionSpent = true;
   }
 

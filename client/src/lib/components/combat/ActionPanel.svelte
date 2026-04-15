@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { getSocket } from '$lib/socket';
+  import { setSuggestion, clearSuggestion } from '$lib/stores/diceSuggestion';
 
   export let currentCombatant = null;
   export let myCharId         = null;
@@ -114,10 +115,12 @@
     showAbilityPicker = false;
     const s = getSocket();
     if (!s) return;
-    const name = currentCombatant?.name ?? 'Unknown';
+    const name       = currentCombatant?.name ?? 'Unknown';
+    const resolution = spell.hitResolutionType;
+    const isDot      = spell.damageTiming === 'DOT';
 
-    if (spell.saveAbility) {
-      // Saving throw spell — open savingThrow sub-form
+    if (resolution === 'SAVING_THROW') {
+      setSuggestion('1d20', `DC ${spell.saveDC ?? 13} ${spell.saveAbility} Save`, spell.name);
       selectAction({
         label:       spell.name,
         type:        'savingThrow',
@@ -127,9 +130,10 @@
         damageDice:  spell.damageDice ?? '',
         damageType:  spell.damageType ?? '',
         halfOnSave:  spell.halfOnSave ?? false,
+        isDot,
       });
-    } else if (spell.damageDice) {
-      // Direct damage spell — attack roll
+    } else if (resolution === 'DIRECT_HIT') {
+      setSuggestion('1d20', 'Spell Attack Roll', spell.name);
       selectAction({
         label:       spell.name,
         type:        'attack',
@@ -137,6 +141,43 @@
         damageDice:  spell.damageDice,
         damageType:  spell.damageType ?? '',
         attackBonus: 0,
+        isDot,
+      });
+    } else if (resolution === 'AUTO_HIT') {
+      setSuggestion(spell.damageDice ?? '1d4', `Damage (${spell.damageType ?? ''})`, spell.name);
+      selectAction({
+        label:      spell.name,
+        type:       'autoHit',
+        resource:   'action',
+        damageDice: spell.damageDice,
+        damageType: spell.damageType ?? '',
+        isDot,
+      });
+    } else if (spell.saveAbility) {
+      // Fallback for unclassified saving throw spells (legacy data)
+      setSuggestion('1d20', `DC 13 ${spell.saveAbility} Save`, spell.name);
+      selectAction({
+        label:       spell.name,
+        type:        'savingThrow',
+        resource:    'action',
+        saveDC:      13,
+        saveAbility: spell.saveAbility,
+        damageDice:  spell.damageDice ?? '',
+        damageType:  spell.damageType ?? '',
+        halfOnSave:  spell.halfOnSave ?? false,
+        isDot,
+      });
+    } else if (spell.damageDice) {
+      // Fallback for unclassified damage spells (legacy data)
+      setSuggestion('1d20', 'Spell Attack Roll', spell.name);
+      selectAction({
+        label:       spell.name,
+        type:        'attack',
+        resource:    'action',
+        damageDice:  spell.damageDice,
+        damageType:  spell.damageType ?? '',
+        attackBonus: 0,
+        isDot,
       });
     } else {
       // Utility / no-damage spell — log immediately
@@ -205,7 +246,7 @@
     }
   }
 
-  function cancel() { selected = null; waiting = false; freeText = ''; }
+  function cancel() { selected = null; waiting = false; freeText = ''; clearSuggestion(); }
 
   function submit() {
     const s = getSocket();
@@ -220,10 +261,15 @@
     delete params.includeProfBonus;
     delete params.profBonusValue;
 
+    // Carry isDot flag in params so backend can attach DoT marker
+    if (selected.isDot) params.isDot = true;
+
     if (selected.type === 'attack') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${subForm.damageDice || '1d8'} ${subForm.damageType || ''})`;
     } else if (selected.type === 'savingThrow') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (DC ${subForm.saveDC} ${subForm.saveAbility} save)`;
+    } else if (selected.type === 'autoHit') {
+      description = `${selected.label} → ${subForm.targetName || 'target'} (auto-hit: ${subForm.damageDice || '1d4'} ${subForm.damageType || ''})`;
     } else if (selected.type === 'heal') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${selected.healDice || subForm.healDice || '1d8'}+${subForm.healModifier || 0})`;
       params.healDice = selected.healDice || subForm.healDice || '1d8';
@@ -248,6 +294,7 @@
     }
     selected = null;
     freeText = '';
+    clearSuggestion();
   }
 </script>
 
@@ -276,6 +323,10 @@
 
       {#if selected.description}
         <p class="action-desc">{selected.description}</p>
+      {/if}
+
+      {#if selected.isDot}
+        <div class="dot-banner">DoT — applies ongoing damage each round while concentration holds.</div>
       {/if}
 
       {#if selected.type === 'attack'}
@@ -317,6 +368,21 @@
         <div class="prof-row">
           <input type="checkbox" id="halfOnSave" bind:checked={subForm.halfOnSave} />
           <label for="halfOnSave">Half damage on successful save</label>
+        </div>
+
+      {:else if selected.type === 'autoHit'}
+        <div class="field-sm">
+          <label>Target</label>
+          <select bind:value={subForm.targetInstanceId}
+            on:change={e => { const t = targetOptions.find(c => c.instanceId === e.target.value); subForm.targetName = t?.name; }}>
+            <option value="">— select target —</option>
+            {#each targetOptions as c}<option value={c.instanceId}>{c.name}</option>{/each}
+          </select>
+        </div>
+        <div class="field-row-2">
+          <div class="field-sm"><label>Damage Dice</label><input bind:value={subForm.damageDice} placeholder="1d4+1" /></div>
+          <div class="field-sm"><label>Damage Type</label><input bind:value={subForm.damageType} placeholder="force" /></div>
+          <div class="field-sm"><label>Damage Bonus</label><input type="number" bind:value={subForm.damageBonus} placeholder="0" /></div>
         </div>
 
       {:else if selected.type === 'heal'}
@@ -610,6 +676,14 @@
   /* Sub-form */
   .sub-form { display: flex; flex-direction: column; gap: 0.5rem; }
   .sub-form-head { display: flex; align-items: center; justify-content: space-between; }
+  .dot-banner {
+    font-size: 0.75rem;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    border-radius: var(--radius, 6px);
+    padding: 0.3rem 0.625rem;
+    color: #92400e;
+  }
   .field-sm { display: flex; flex-direction: column; gap: 0.2rem; }
   .field-sm label { font-size: 0.75rem; font-weight: 500; color: var(--text-muted); }
   .field-sm input, .field-sm select { font-size: 0.8125rem; }

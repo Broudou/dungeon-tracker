@@ -34,6 +34,7 @@ app.use('/api/campaigns',       require('./routes/campaigns'));
 app.use('/api/sessions',        require('./routes/sessions'));
 app.use('/api/monsters',        require('./routes/monsters'));
 app.use('/api/spells',          require('./routes/spells'));
+app.use('/api/abilities',       require('./routes/abilities'));
 app.use('/api/custom-creatures', require('./routes/customCreatures'));
 
 // ── Serve SvelteKit build in production ───────────────────────────────────────

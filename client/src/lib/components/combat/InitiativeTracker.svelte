@@ -69,6 +69,9 @@
           </div>
           <span class="c-hp-num">{c.currentHp}/{c.maxHp}</span>
           <span class="c-init">{c.initiative}</span>
+          {#if c.dotEffects?.length > 0}
+            <span class="dot-badge" title="{c.dotEffects.length} DoT effect(s)">🔥{c.dotEffects.length}</span>
+          {/if}
         </div>
 
         <!-- Conditions & tags row -->
@@ -130,6 +133,24 @@
             {:else}
               <button class="btn btn-ghost btn-sm" style="margin-top: 0.25rem;"
                 on:click={() => { addingTagFor = c.instanceId; tagInput = ''; }}>+ Tag</button>
+            {/if}
+
+            <!-- DoT effects (DM can remove) -->
+            {#if c.dotEffects?.length > 0}
+              <div class="dot-section">
+                <span class="dot-section-label">Active DoTs</span>
+                {#each c.dotEffects as dot}
+                  <div class="dot-row">
+                    <span class="dot-name">{dot.spellName}</span>
+                    <span class="dot-dice">{dot.damageDice} {dot.damageType}</span>
+                    <span class="dot-round">R{dot.appliedRound}</span>
+                    <button class="btn btn-ghost btn-sm dot-remove"
+                      on:click|stopPropagation={() => getSocket()?.emit('combat:removeDot', { instanceId: c.instanceId, effectId: dot.effectId })}>
+                      Remove
+                    </button>
+                  </div>
+                {/each}
+              </div>
             {/if}
           </div>
         {/if}
@@ -200,6 +221,15 @@
 
   .c-hp-num { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
   .c-init   { font-size: 0.75rem; font-weight: 700; color: var(--text); min-width: 1.5em; text-align: right; flex-shrink: 0; }
+
+  .dot-badge { font-size: 0.7rem; color: #f97316; flex-shrink: 0; cursor: default; }
+  .dot-section { display: flex; flex-direction: column; gap: 2px; margin-top: 0.375rem; }
+  .dot-section-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; color: var(--text-faint); }
+  .dot-row { display: flex; align-items: center; gap: 0.375rem; font-size: 0.78rem; }
+  .dot-name { font-weight: 600; flex: 1; }
+  .dot-dice { color: #ef4444; font-size: 0.72rem; }
+  .dot-round { color: var(--text-faint); font-size: 0.7rem; }
+  .dot-remove { margin-left: auto; }
 
   .pill-row { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 0.5rem 0.35rem; }
 

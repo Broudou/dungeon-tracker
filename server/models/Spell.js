@@ -14,6 +14,9 @@ const SpellSchema = new mongoose.Schema({
   saveAbility: String,
   healDice: String,
   halfOnSave: { type: Boolean, default: false },
+  isDamage:          { type: Boolean, default: false },
+  hitResolutionType: { type: String, enum: ['DIRECT_HIT', 'SAVING_THROW', 'AUTO_HIT', null], default: null },
+  damageTiming:      { type: String, enum: ['INSTANT', 'DOT', null], default: null },
   description: String,
   // comma-separated list of classes that can use this spell
   classes: { type: String, index: true },

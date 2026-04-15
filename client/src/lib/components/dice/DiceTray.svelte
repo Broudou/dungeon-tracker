@@ -1,5 +1,10 @@
 <script>
   import { getSocket } from '$lib/socket';
+  import { diceSuggestion, clearSuggestion } from '$lib/stores/diceSuggestion';
+
+  function useSuggestion() {
+    if ($diceSuggestion) { formula = $diceSuggestion.formula; clearSuggestion(); }
+  }
 
   export let open = false;
 
@@ -87,6 +92,19 @@
       <span class="tray-title">Dice Tray</span>
       <button class="btn btn-ghost btn-sm" on:click={() => open = false}>✕</button>
     </div>
+
+    <!-- Suggestion banner from ActionPanel -->
+    {#if $diceSuggestion}
+      <div class="suggestion-banner">
+        <div class="sug-info">
+          <span class="sug-label">{$diceSuggestion.label}</span>
+          <span class="sug-formula">{$diceSuggestion.formula}</span>
+          {#if $diceSuggestion.context}<span class="sug-ctx">{$diceSuggestion.context}</span>{/if}
+        </div>
+        <button class="btn btn-primary btn-sm" on:click={useSuggestion}>Use</button>
+        <button class="btn btn-ghost btn-sm" on:click={clearSuggestion}>✕</button>
+      </div>
+    {/if}
 
     <!-- Quick-add dice -->
     <div class="dice-row">
@@ -176,6 +194,18 @@
     justify-content: space-between;
   }
   .tray-title { font-size: 0.875rem; font-weight: 600; }
+
+  .suggestion-banner {
+    display: flex; align-items: center; gap: 0.375rem;
+    background: var(--surface-2, #f8f7ff);
+    border: 1px solid var(--accent, #7c6af7);
+    border-radius: var(--radius, 6px);
+    padding: 0.375rem 0.5rem;
+  }
+  .sug-info { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .sug-label   { font-size: 0.65rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+  .sug-formula { font-size: 0.85rem; font-weight: 600; font-family: monospace; }
+  .sug-ctx     { font-size: 0.65rem; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .dice-row { display: flex; gap: 0.25rem; flex-wrap: wrap; }
   .die-btn {

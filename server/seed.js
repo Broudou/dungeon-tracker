@@ -16,6 +16,10 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const Monster  = require('./models/Monster');
 const Spell    = require('./models/Spell');
+const Ability  = require('./models/Ability');
+
+const HARDCODED_SPELLS    = require('./data/spells');
+const HARDCODED_ABILITIES = require('./data/abilities');
 
 const TIMEOUT = 20_000;
 
@@ -373,30 +377,17 @@ async function seed() {
   const insertedMonsters = await Monster.insertMany(monsters, { ordered: false });
   console.log(`  Inserted ${insertedMonsters.length} monsters\n`);
 
-  // ── Spells ────────────────────────────────────────────────────────────────
+  // ── Spells (hardcoded PHB/SRD data — no runtime fetch) ───────────────────
   console.log('Seeding spells…');
-  let spells;
-  try {
-    const raw = await fetchDnd5eSpells();
-    spells = raw.map(mapDnd5eSpell);
-    console.log(`  Mapped ${spells.length} spells from dnd5eapi.co`);
-  } catch (err) {
-    console.warn(`  dnd5eapi.co unavailable (${err.message}), trying open5e…`);
-    try {
-      const raw = await fetchOpen5eAll(
-        'https://api.open5e.com/v1/spells/?limit=100&document__slug=wotc-srd&ordering=level_int'
-      );
-      spells = raw.map(mapOpen5eSpell);
-      console.log(`  Mapped ${spells.length} spells from open5e`);
-    } catch (err2) {
-      console.warn(`  open5e also unavailable (${err2.message}), using ${FALLBACK_SPELLS.length} built-in spells`);
-      spells = FALLBACK_SPELLS;
-    }
-  }
-
   await Spell.deleteMany({});
-  const insertedSpells = await Spell.insertMany(spells, { ordered: false });
+  const insertedSpells = await Spell.insertMany(HARDCODED_SPELLS, { ordered: false });
   console.log(`  Inserted ${insertedSpells.length} spells\n`);
+
+  // ── Abilities & Traits ────────────────────────────────────────────────────
+  console.log('Seeding abilities…');
+  await Ability.deleteMany({});
+  const insertedAbilities = await Ability.insertMany(HARDCODED_ABILITIES, { ordered: false });
+  console.log(`  Inserted ${insertedAbilities.length} abilities\n`);
 
   console.log('Seed complete.');
   await mongoose.disconnect();

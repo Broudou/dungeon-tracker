@@ -136,6 +136,29 @@
     const updated = (selectedChar.knownSpells ?? []).filter(s => (s._id ?? s) !== spellId);
     dispatch('spellsUpdate', { playerId: selectedChar._id, knownSpells: updated });
   }
+
+  // ── Abilities & Traits section ───────────────────────────────────────────────
+  let abilitiesOpen    = false;
+  let abilitiesList    = [];
+  let abilitiesLoading = false;
+  let abilitiesError   = false;
+
+  async function loadAbilities() {
+    if (!selectedChar) return;
+    abilitiesLoading = true;
+    abilitiesError   = false;
+    try {
+      const cls = encodeURIComponent(selectedChar.class ?? '');
+      const res = await fetch(`/api/abilities?class=${cls}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('fetch failed');
+      abilitiesList = await res.json();
+    } catch {
+      abilitiesError = true;
+    }
+    abilitiesLoading = false;
+  }
+
+  $: if (selectedChar && abilitiesOpen) loadAbilities();
 </script>
 
 <div class="abilities-layout">
@@ -330,6 +353,42 @@
         {/if}
       </div>
 
+      <!-- ── Abilities & Traits section ────────────────────────────────────── -->
+      <div class="section-block">
+        <div class="section-header-row">
+          <span class="section-title">Abilities & Traits</span>
+          <button class="btn-inline" on:click={() => { abilitiesOpen = !abilitiesOpen; }}>
+            {abilitiesOpen ? 'Collapse' : 'Show'}
+          </button>
+        </div>
+
+        {#if abilitiesOpen}
+          <div transition:slide={{ duration: 180 }}>
+            {#if abilitiesLoading}
+              <p class="empty-state" style="font-size: 0.8rem;">Loading…</p>
+            {:else if abilitiesError}
+              <p class="empty-state" style="color: #ef4444; font-size: 0.8rem;">Failed to load abilities.</p>
+            {:else if abilitiesList.length === 0}
+              <p class="empty-state" style="font-size: 0.8rem;">No abilities found for {selectedChar?.class ?? 'this class'}.</p>
+            {:else}
+              <div class="ability-list">
+                {#each abilitiesList as ab}
+                  <div class="ability-row">
+                    <div class="ability-row-head">
+                      <span class="ability-name">{ab.name}</span>
+                      <span class="ability-type-badge ability-type-{ab.type}">{ab.type}</span>
+                      {#if ab.resource && ab.resource !== 'passive'}
+                        <span class="ability-resource">{ab.resource}</span>
+                      {/if}
+                    </div>
+                    <p class="ability-desc">{ab.description}</p>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -425,6 +484,29 @@
 
   /* ── Section blocks ──────────────────────────────────────────────────────── */
   .section-block { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  /* ── Abilities & Traits ──────────────────────────────────────────────────── */
+  .ability-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .ability-row {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    padding: 0.5rem 0.75rem;
+  }
+  .ability-row-head { display: flex; align-items: center; gap: 0.375rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
+  .ability-name { font-size: 0.875rem; font-weight: 600; flex: 1; }
+  .ability-type-badge {
+    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+    border-radius: 99px; padding: 1px 0.4rem; border: 1px solid;
+  }
+  .ability-type-ability { background: #dbeafe; border-color: #bfdbfe; color: #1e40af; }
+  .ability-type-trait   { background: #f3e8ff; border-color: #e9d5ff; color: #6b21a8; }
+  .ability-resource {
+    font-size: 0.65rem; color: var(--text-faint);
+    background: var(--surface-3); border: 1px solid var(--border);
+    border-radius: 99px; padding: 1px 0.4rem;
+  }
+  .ability-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; margin: 0; }
   .section-header-row {
     display: flex;
     align-items: center;
