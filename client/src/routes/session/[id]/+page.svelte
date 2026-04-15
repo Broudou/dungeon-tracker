@@ -30,13 +30,19 @@
   let displayName   = '';
   let worldRollFeed = [];
   let toast         = '';
-  let allSpells     = [];
+  let allSpells      = [];
+  let allAbilities   = [];
   let expandedSpells    = new Set();
+  let expandedAbilities = new Set();
   let expandedCreatures = new Set();
   let spellFilter      = '';
   let spellClassFilter = '';
   let creatureFilter   = '';
   let crFilter         = '';
+  // Category visibility toggles for Spells tab
+  let showSpells     = true;
+  let showAbilities  = true;
+  let showTraits     = true;
 
   const SUBCLASSES = {
     Barbarian: { minLevel: 3, options: ['Path of the Berserker', 'Totem Warrior'] },
@@ -205,6 +211,10 @@
       try {
         const res = await fetch('/api/spells?limit=500', { credentials: 'include' });
         if (res.ok) allSpells = await res.json();
+      } catch { /* non-fatal */ }
+      try {
+        const res = await fetch('/api/abilities?limit=2000', { credentials: 'include' });
+        if (res.ok) allAbilities = await res.json();
       } catch { /* non-fatal */ }
     }
 
@@ -569,57 +579,126 @@
 <!-- ══════════════════════════════════════════════ SPELLS TAB ══ -->
 {#if activeTab === 'spells' && isDM}
   <div class="ref-tab">
-    <div class="ref-search-bar">
-      <input class="ref-search" type="search" placeholder="Filter spells…" bind:value={spellFilter} />
+
+    <!-- Category toggle pills -->
+    <div class="spell-category-filters">
+      <button class="spell-cat-btn" class:active={showSpells}    on:click={() => showSpells    = !showSpells}>Spells</button>
+      <button class="spell-cat-btn" class:active={showAbilities} on:click={() => showAbilities = !showAbilities}>Abilities</button>
+      <button class="spell-cat-btn" class:active={showTraits}    on:click={() => showTraits    = !showTraits}>Traits</button>
     </div>
-    <div class="spell-class-filters">
-      <button class="spell-class-btn" class:active={spellClassFilter === ''} on:click={() => spellClassFilter = ''}>All</button>
-      {#each spellClasses as cls}
-        <button class="spell-class-btn" class:active={spellClassFilter === cls} on:click={() => spellClassFilter = cls}>{cls}</button>
-      {/each}
-    </div>
-    {#each groupBySchool(filteredSpells) as group (group.school)}
-      <div class="ref-group">
-        <div class="ref-group-label">{group.school}</div>
-        {#each group.list as spell (spell._id)}
-          {@const open = expandedSpells.has(spell._id)}
-          <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedSpells.delete(spell._id); else expandedSpells.add(spell._id); expandedSpells = expandedSpells; }}>
-            <div class="ref-card-head">
-              <span class="ref-card-name">{spell.name}</span>
-              <span class="ref-card-meta">{spell.level === 0 ? 'Cantrip' : `Lv ${spell.level}`}</span>
-              <span class="ref-chevron">{open ? '▲' : '▼'}</span>
-            </div>
-            {#if open}
-              <div class="ref-card-body">
-                <div class="ref-meta-row">
-                  {#if spell.castingTime}<span><strong>Cast:</strong> {spell.castingTime}</span>{/if}
-                  {#if spell.range}<span><strong>Range:</strong> {spell.range}</span>{/if}
-                  {#if spell.duration}<span><strong>Duration:</strong> {spell.duration}</span>{/if}
-                  {#if spell.components}<span><strong>Components:</strong> {spell.components}</span>{/if}
-                  {#if spell.concentration}<span class="pill pill-yellow">Concentration</span>{/if}
+
+    <!-- ── SPELLS ── -->
+    {#if showSpells}
+      <div class="ref-section-block">
+        <div class="ref-block-header">Spells</div>
+        <div class="ref-search-bar">
+          <input class="ref-search" type="search" placeholder="Filter spells…" bind:value={spellFilter} />
+        </div>
+        <div class="spell-class-filters">
+          <button class="spell-class-btn" class:active={spellClassFilter === ''} on:click={() => spellClassFilter = ''}>All</button>
+          {#each spellClasses as cls}
+            <button class="spell-class-btn" class:active={spellClassFilter === cls} on:click={() => spellClassFilter = cls}>{cls}</button>
+          {/each}
+        </div>
+        {#each groupBySchool(filteredSpells) as group (group.school)}
+          <div class="ref-group">
+            <div class="ref-group-label">{group.school}</div>
+            {#each group.list as spell (spell._id)}
+              {@const open = expandedSpells.has(spell._id)}
+              <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedSpells.delete(spell._id); else expandedSpells.add(spell._id); expandedSpells = expandedSpells; }}>
+                <div class="ref-card-head">
+                  <span class="ref-card-name">{spell.name}</span>
+                  <span class="ref-card-meta">{spell.level === 0 ? 'Cantrip' : `Lv ${spell.level}`}</span>
+                  {#if spell.concentration}<span class="pill pill-yellow" style="margin-left:auto;margin-right:.5rem;">Conc.</span>{/if}
+                  <span class="ref-chevron">{open ? '▲' : '▼'}</span>
                 </div>
-                {#if spell.damageDice || spell.damageType || spell.healDice}
-                  <div class="ref-meta-row" style="margin-top: 0.25rem;">
-                    {#if spell.damageDice}<span><strong>Damage:</strong> {spell.damageDice}{spell.damageType ? ` ${spell.damageType}` : ''}</span>{/if}
-                    {#if spell.healDice}<span><strong>Heal:</strong> {spell.healDice}</span>{/if}
-                    {#if spell.saveAbility}<span><strong>Save:</strong> {spell.saveAbility}{spell.halfOnSave ? ' (half on save)' : ''}</span>{/if}
+                {#if open}
+                  <div class="ref-card-body">
+                    <div class="ref-meta-row">
+                      {#if spell.castingTime}<span><strong>Cast:</strong> {spell.castingTime}</span>{/if}
+                      {#if spell.range}<span><strong>Range:</strong> {spell.range}</span>{/if}
+                      {#if spell.duration}<span><strong>Duration:</strong> {spell.duration}</span>{/if}
+                      {#if spell.components}<span><strong>Components:</strong> {spell.components}</span>{/if}
+                    </div>
+                    {#if spell.damageDice || spell.damageType || spell.healDice || spell.saveAbility}
+                      <div class="ref-meta-row" style="margin-top: 0.25rem;">
+                        {#if spell.damageDice}<span><strong>Damage:</strong> {spell.damageDice}{spell.damageType ? ` ${spell.damageType}` : ''}</span>{/if}
+                        {#if spell.healDice}<span><strong>Heal:</strong> {spell.healDice}</span>{/if}
+                        {#if spell.saveAbility}<span><strong>Save:</strong> {spell.saveAbility}{spell.halfOnSave ? ' (half on save)' : ''}</span>{/if}
+                      </div>
+                    {/if}
+                    {#if spell.description}
+                      <p class="ref-description">{spell.description}</p>
+                    {/if}
+                    {#if spell.classes}
+                      <div class="ref-classes">{spell.classes}</div>
+                    {/if}
                   </div>
                 {/if}
-                {#if spell.description}
-                  <p class="ref-description">{spell.description}</p>
-                {/if}
-                {#if spell.classes}
-                  <div class="ref-classes">{spell.classes}</div>
-                {/if}
-              </div>
-            {/if}
-          </button>
+              </button>
+            {/each}
+          </div>
         {/each}
+        {#if allSpells.length === 0}
+          <p class="ref-empty">No spells loaded.</p>
+        {/if}
       </div>
-    {/each}
-    {#if allSpells.length === 0}
-      <p class="ref-empty">No spells loaded.</p>
     {/if}
+
+    <!-- ── ABILITIES ── -->
+    {#if showAbilities}
+      {@const abilityList = allAbilities.filter(a => a.type === 'ability')}
+      <div class="ref-section-block">
+        <div class="ref-block-header">Abilities</div>
+        {#if abilityList.length === 0}
+          <p class="ref-empty">No abilities loaded.</p>
+        {:else}
+          {#each abilityList as ab (ab._id)}
+            {@const open = expandedAbilities.has(ab._id)}
+            <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedAbilities.delete(ab._id); else expandedAbilities.add(ab._id); expandedAbilities = expandedAbilities; }}>
+              <div class="ref-card-head">
+                <span class="ref-card-name">{ab.name}</span>
+                {#if ab.classes?.length}<span class="ref-card-meta">{ab.classes.join(', ')}</span>{/if}
+                {#if ab.level > 1}<span class="badge" style="margin-left:.25rem;">Lv {ab.level}</span>{/if}
+                <span class="ref-chevron">{open ? '▲' : '▼'}</span>
+              </div>
+              {#if open && ab.description}
+                <div class="ref-card-body">
+                  <p class="ref-description">{ab.description}</p>
+                </div>
+              {/if}
+            </button>
+          {/each}
+        {/if}
+      </div>
+    {/if}
+
+    <!-- ── TRAITS ── -->
+    {#if showTraits}
+      {@const traitList = allAbilities.filter(a => a.type === 'trait')}
+      <div class="ref-section-block">
+        <div class="ref-block-header">Traits</div>
+        {#if traitList.length === 0}
+          <p class="ref-empty">No traits loaded.</p>
+        {:else}
+          {#each traitList as tr (tr._id)}
+            {@const open = expandedAbilities.has(tr._id)}
+            <button class="ref-card" class:ref-open={open} on:click={() => { if (open) expandedAbilities.delete(tr._id); else expandedAbilities.add(tr._id); expandedAbilities = expandedAbilities; }}>
+              <div class="ref-card-head">
+                <span class="ref-card-name">{tr.name}</span>
+                <span class="ref-chevron">{open ? '▲' : '▼'}</span>
+              </div>
+              {#if open && tr.description}
+                <div class="ref-card-body">
+                  <p class="ref-description">{tr.description}</p>
+                </div>
+              {/if}
+            </button>
+          {/each}
+        {/if}
+      </div>
+    {/if}
+
   </div>
 {/if}
 
@@ -1491,6 +1570,39 @@
   }
   .spell-class-btn:hover { background: var(--surface-3); }
   .spell-class-btn.active { background: var(--primary, #60a5fa); border-color: var(--primary, #60a5fa); color: #fff; }
+  /* Category toggle pills */
+  .spell-category-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.75rem 1rem 0;
+  }
+  .spell-cat-btn {
+    padding: 0.3rem 0.85rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-family: inherit;
+    transition: all 0.1s;
+    opacity: 0.55;
+  }
+  .spell-cat-btn:hover { opacity: 0.85; background: var(--surface-3); }
+  .spell-cat-btn.active { background: var(--primary, #60a5fa); border-color: var(--primary, #60a5fa); color: #fff; opacity: 1; }
+  .ref-section-block { margin-bottom: 1.5rem; }
+  .ref-block-header {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    padding: 0.5rem 1rem 0.25rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.25rem;
+  }
   .ref-filter-select {
     padding: 0.375rem 0.625rem;
     background: var(--surface);

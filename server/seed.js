@@ -1,12 +1,12 @@
 /**
- * Seed script — populates Monster and Spell collections.
+ * Seed script — populates Monster, Spell, and Ability collections.
  *
- * Monster source priority:
- *   1. https://www.dnd5eapi.co/api  (official D&D 5e SRD API, ~330 monsters)
+ * Source priority for all data:
+ *   1. https://www.dnd5eapi.co/api  (official D&D 5e SRD API)
  *   2. https://api.open5e.com       (fallback, same SRD data, paginated)
  *   3. Embedded minimal fallback    (offline / both APIs down)
  *
- * Spell source: open5e SRD (fallback to embedded list)
+ * Fetched: monsters, spells, class features (abilities), racial traits
  *
  * Usage: npm run seed
  * Requires Node 18+ (native fetch).
@@ -73,6 +73,56 @@ async function fetchDnd5eSpells() {
   }
   process.stdout.write('\n');
   return spells;
+}
+
+async function fetchDnd5eFeatures() {
+  const listRes = await fetch('https://www.dnd5eapi.co/api/features', {
+    signal: AbortSignal.timeout(TIMEOUT),
+  });
+  if (!listRes.ok) throw new Error(`dnd5eapi features list HTTP ${listRes.status}`);
+  const { results } = await listRes.json();
+  console.log(`  Found ${results.length} features on dnd5eapi.co — fetching full data…`);
+
+  const features = [];
+  const BATCH    = 15;
+  for (let i = 0; i < results.length; i += BATCH) {
+    const batch   = results.slice(i, i + BATCH);
+    const fetched = await Promise.all(
+      batch.map(f =>
+        fetch(`https://www.dnd5eapi.co${f.url}`, { signal: AbortSignal.timeout(TIMEOUT) })
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status} for ${f.url}`); return r.json(); })
+      )
+    );
+    features.push(...fetched);
+    process.stdout.write(`\r  Fetched ${features.length}/${results.length}…`);
+  }
+  process.stdout.write('\n');
+  return features;
+}
+
+async function fetchDnd5eTraits() {
+  const listRes = await fetch('https://www.dnd5eapi.co/api/traits', {
+    signal: AbortSignal.timeout(TIMEOUT),
+  });
+  if (!listRes.ok) throw new Error(`dnd5eapi traits list HTTP ${listRes.status}`);
+  const { results } = await listRes.json();
+  console.log(`  Found ${results.length} traits on dnd5eapi.co — fetching full data…`);
+
+  const traits = [];
+  const BATCH  = 15;
+  for (let i = 0; i < results.length; i += BATCH) {
+    const batch   = results.slice(i, i + BATCH);
+    const fetched = await Promise.all(
+      batch.map(t =>
+        fetch(`https://www.dnd5eapi.co${t.url}`, { signal: AbortSignal.timeout(TIMEOUT) })
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status} for ${t.url}`); return r.json(); })
+      )
+    );
+    traits.push(...fetched);
+    process.stdout.write(`\r  Fetched ${traits.length}/${results.length}…`);
+  }
+  process.stdout.write('\n');
+  return traits;
 }
 
 // ── open5e paginated fetcher (fallback) ───────────────────────────────────────
@@ -182,6 +232,30 @@ function mapDnd5eSpell(s) {
     healDice:      s.heal_at_slot_level ? Object.values(s.heal_at_slot_level)[0] : null,
     description:   (s.desc || []).join('\n'),
     classes:       (s.classes || []).map(c => c.name).join(', '),
+  };
+}
+
+function mapDnd5eFeature(f) {
+  return {
+    name:        f.name,
+    description: (f.desc || []).join('\n'),
+    type:        'ability',
+    classes:     f.class?.name ? [f.class.name] : [],
+    level:       f.level || 1,
+    resource:    'passive',
+    actionType:  null,
+  };
+}
+
+function mapDnd5eTrait(t) {
+  return {
+    name:        t.name,
+    description: (t.desc || []).join('\n'),
+    type:        'trait',
+    classes:     [],
+    level:       1,
+    resource:    'passive',
+    actionType:  null,
   };
 }
 
@@ -377,17 +451,48 @@ async function seed() {
   const insertedMonsters = await Monster.insertMany(monsters, { ordered: false });
   console.log(`  Inserted ${insertedMonsters.length} monsters\n`);
 
-  // ── Spells (hardcoded PHB/SRD data — no runtime fetch) ───────────────────
+  // ── Spells ────────────────────────────────────────────────────────────────
   console.log('Seeding spells…');
+  let spells;
+  try {
+    const raw = await fetchDnd5eSpells();
+    spells    = raw.map(mapDnd5eSpell);
+    console.log(`  Mapped ${spells.length} spells from dnd5eapi.co`);
+  } catch (err) {
+    console.warn(`  dnd5eapi.co spells unavailable (${err.message}), trying open5e…`);
+    try {
+      const raw = await fetchOpen5eAll('https://api.open5e.com/v1/spells/?limit=100&document__slug=wotc-srd');
+      spells    = raw.map(mapOpen5eSpell);
+      console.log(`  Mapped ${spells.length} spells from open5e`);
+    } catch (err2) {
+      console.warn(`  open5e also unavailable (${err2.message}), using ${HARDCODED_SPELLS.length} built-in spells`);
+      spells = HARDCODED_SPELLS;
+    }
+  }
   await Spell.deleteMany({});
-  const insertedSpells = await Spell.insertMany(HARDCODED_SPELLS, { ordered: false });
+  const insertedSpells = await Spell.insertMany(spells, { ordered: false });
   console.log(`  Inserted ${insertedSpells.length} spells\n`);
 
   // ── Abilities & Traits ────────────────────────────────────────────────────
-  console.log('Seeding abilities…');
+  console.log('Seeding abilities & traits…');
+  let abilities;
+  try {
+    console.log('  Fetching class features…');
+    const rawFeatures = await fetchDnd5eFeatures();
+    console.log('  Fetching racial traits…');
+    const rawTraits   = await fetchDnd5eTraits();
+    abilities = [
+      ...rawFeatures.map(mapDnd5eFeature),
+      ...rawTraits.map(mapDnd5eTrait),
+    ];
+    console.log(`  Mapped ${abilities.length} abilities/traits from dnd5eapi.co`);
+  } catch (err) {
+    console.warn(`  dnd5eapi.co abilities unavailable (${err.message}), using ${HARDCODED_ABILITIES.length} built-in abilities`);
+    abilities = HARDCODED_ABILITIES;
+  }
   await Ability.deleteMany({});
-  const insertedAbilities = await Ability.insertMany(HARDCODED_ABILITIES, { ordered: false });
-  console.log(`  Inserted ${insertedAbilities.length} abilities\n`);
+  const insertedAbilities = await Ability.insertMany(abilities, { ordered: false });
+  console.log(`  Inserted ${insertedAbilities.length} abilities/traits\n`);
 
   console.log('Seed complete.');
   await mongoose.disconnect();

@@ -119,6 +119,12 @@
     const resolution = spell.hitResolutionType;
     const isDot      = spell.damageTiming === 'DOT';
 
+    const spellMeta = {
+      spellName:        spell.name,
+      concentration:    spell.concentration ?? false,
+      spellDescription: isDot ? (spell.description ?? '') : '',
+    };
+
     if (resolution === 'SAVING_THROW') {
       setSuggestion('1d20', `DC ${spell.saveDC ?? 13} ${spell.saveAbility} Save`, spell.name);
       selectAction({
@@ -131,6 +137,7 @@
         damageType:  spell.damageType ?? '',
         halfOnSave:  spell.halfOnSave ?? false,
         isDot,
+        ...spellMeta,
       });
     } else if (resolution === 'DIRECT_HIT') {
       setSuggestion('1d20', 'Spell Attack Roll', spell.name);
@@ -142,6 +149,7 @@
         damageType:  spell.damageType ?? '',
         attackBonus: 0,
         isDot,
+        ...spellMeta,
       });
     } else if (resolution === 'AUTO_HIT') {
       setSuggestion(spell.damageDice ?? '1d4', `Damage (${spell.damageType ?? ''})`, spell.name);
@@ -152,6 +160,7 @@
         damageDice: spell.damageDice,
         damageType: spell.damageType ?? '',
         isDot,
+        ...spellMeta,
       });
     } else if (spell.saveAbility) {
       // Fallback for unclassified saving throw spells (legacy data)
@@ -166,6 +175,7 @@
         damageType:  spell.damageType ?? '',
         halfOnSave:  spell.halfOnSave ?? false,
         isDot,
+        ...spellMeta,
       });
     } else if (spell.damageDice) {
       // Fallback for unclassified damage spells (legacy data)
@@ -178,6 +188,7 @@
         damageType:  spell.damageType ?? '',
         attackBonus: 0,
         isDot,
+        ...spellMeta,
       });
     } else {
       // Utility / no-damage spell — log immediately
@@ -261,8 +272,11 @@
     delete params.includeProfBonus;
     delete params.profBonusValue;
 
-    // Carry isDot flag in params so backend can attach DoT marker
-    if (selected.isDot) params.isDot = true;
+    // Carry spell metadata so backend can log spell info
+    if (selected.isDot)             params.isDot             = true;
+    if (selected.spellName)         params.spellName         = selected.spellName;
+    if (selected.concentration)     params.concentration     = selected.concentration;
+    if (selected.spellDescription)  params.spellDescription  = selected.spellDescription;
 
     if (selected.type === 'attack') {
       description = `${selected.label} → ${subForm.targetName || 'target'} (${subForm.damageDice || '1d8'} ${subForm.damageType || ''})`;

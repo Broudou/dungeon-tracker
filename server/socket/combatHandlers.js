@@ -553,7 +553,7 @@ async function resolveAction(combat, action, params, io, room) {
   const { actionType } = action;
 
   if (actionType === 'attack') {
-    const { attackBonus = 0, damageDice = '1d6', damageBonus = 0, damageType = '', targetInstanceId, targetName } = params;
+    const { attackBonus = 0, damageDice = '1d6', damageBonus = 0, damageType = '', targetInstanceId, targetName, spellName, concentration } = params;
     const attackRoll = Math.floor(Math.random() * 20) + 1;
     const total = attackRoll + parseInt(attackBonus, 10);
     const target = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
@@ -564,35 +564,31 @@ async function resolveAction(combat, action, params, io, room) {
     } else if (attackRoll === 20 || total >= targetAC) {
       const dmg = rollDice(damageDice);
       const totalDmg = Math.max(0, dmg.total + parseInt(damageBonus, 10));
-      if (target) {
-        target.currentHp = Math.max(0, target.currentHp - totalDmg);
-        if (target.currentHp === 0) {
-          target.isDefeated = true;
-          addLog(combat, `💀 ${target.name} drops to 0 HP`, 'condition');
-        }
-      }
       const crit = attackRoll === 20 ? ' CRITICAL HIT!' : '';
-      addLog(combat, `⚔ ${action.submitterName} hits ${targetName || '?'} for ${totalDmg} ${damageType} damage${crit} (roll: ${attackRoll}+${attackBonus}=${total} vs AC ${targetAC})`, 'damage');
+      addLog(combat, `⚔ ${action.submitterName} hits ${targetName || '?'} — ${totalDmg} ${damageType} damage${crit} (roll: ${attackRoll}+${attackBonus}=${total} vs AC ${targetAC}) [DM: apply damage]`, 'damage');
     } else {
       addLog(combat, `⚔ ${action.submitterName} attacks ${targetName || '?'} — MISS (roll: ${attackRoll}+${attackBonus}=${total} vs AC ${targetAC})`, 'action');
     }
 
-    // Mark action spent
+    if (spellName || concentration) {
+      const tags = [];
+      if (spellName) tags.push(spellName);
+      if (concentration) tags.push('Concentration');
+      addLog(combat, `  ↳ ${tags.join(' · ')}`, 'action');
+    }
+    if (params.isDot && params.spellDescription) {
+      addLog(combat, `  ${params.spellDescription}`, 'action');
+    }
+
     const actor = findActor(combat, action, params);
     if (actor) actor.actionSpent = true;
   }
 
   else if (actionType === 'heal') {
-    const { healDice = '1d8', healModifier = 0, targetInstanceId, targetName } = params;
+    const { healDice = '1d8', healModifier = 0, targetName } = params;
     const healed = rollDice(healDice);
     const total = Math.max(0, healed.total + parseInt(healModifier, 10));
-    const target = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
-    if (target) {
-      const wasDefeated = target.currentHp === 0;
-      target.currentHp = Math.min(target.maxHp, target.currentHp + total);
-      if (wasDefeated && target.currentHp > 0) target.isDefeated = false;
-    }
-    addLog(combat, `❤ ${action.submitterName} heals ${targetName || '?'} for ${total} HP (${healDice}+${healModifier})`, 'heal');
+    addLog(combat, `❤ ${action.submitterName} heals ${targetName || '?'} — ${total} HP (${healDice}+${healModifier}) [DM: apply healing]`, 'heal');
     const actor = findActor(combat, action, params);
     if (actor) {
       if (params.isBonus) actor.bonusActionSpent = true;
@@ -622,14 +618,7 @@ async function resolveAction(combat, action, params, io, room) {
         }
       }
     }
-    if (target) {
-      target.currentHp = Math.max(0, target.currentHp - totalDmg);
-      if (target.currentHp === 0) {
-        target.isDefeated = true;
-        addLog(combat, `💀 ${target.name} drops to 0 HP`, 'condition');
-      }
-    }
-    addLog(combat, `⚔ ${action.submitterName} → ${targetName || '?'}: ${lines.join(', ')} = ${totalDmg} total damage`, 'damage');
+    addLog(combat, `⚔ ${action.submitterName} → ${targetName || '?'}: ${lines.join(', ')} = ${totalDmg} total damage [DM: apply damage]`, 'damage');
     const actor = findActor(combat, action, params);
     if (actor) actor.actionSpent = true;
   }
@@ -638,6 +627,7 @@ async function resolveAction(combat, action, params, io, room) {
     const {
       saveDC = 13, saveAbility = 'DEX', damageDice = '', damageBonus = 0,
       damageType = '', halfOnSave = false, targetInstanceId, targetName,
+      spellName, concentration,
     } = params;
 
     const target = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
@@ -649,58 +639,65 @@ async function resolveAction(combat, action, params, io, room) {
     const saveTotal = saveRoll + abMod;
     const saved = saveTotal >= saveDC;
 
-    let finalDamage = 0;
+    let wouldDeal = 0;
     if (damageDice) {
       const raw = Math.max(0, rollDice(damageDice).total + parseInt(damageBonus, 10));
-      finalDamage = !saved ? raw : (halfOnSave ? Math.floor(raw / 2) : 0);
-    }
-
-    if (target && finalDamage > 0) {
-      target.currentHp = Math.max(0, target.currentHp - finalDamage);
-      if (target.currentHp === 0) {
-        target.isDefeated = true;
-        addLog(combat, `💀 ${target.name} drops to 0 HP`, 'condition');
-      }
+      wouldDeal = !saved ? raw : (halfOnSave ? Math.floor(raw / 2) : 0);
     }
 
     const outcome = saved
-      ? (halfOnSave ? `saved — ${finalDamage} ${damageType} (half)` : 'saved — no damage')
-      : `failed — ${finalDamage} ${damageType} damage`;
+      ? (halfOnSave ? `saved — ${wouldDeal} ${damageType} (half)` : 'saved — no damage')
+      : `failed — ${wouldDeal} ${damageType} damage`;
 
     addLog(combat,
       `✦ ${action.submitterName} → DC ${saveDC} ${saveAbility} save (${targetName || '?'}): ` +
-      `rolled ${saveRoll}${abMod >= 0 ? '+' : ''}${abMod}=${saveTotal} — ${outcome}`,
-      finalDamage > 0 ? 'damage' : 'action'
+      `rolled ${saveRoll}${abMod >= 0 ? '+' : ''}${abMod}=${saveTotal} — ${outcome}${wouldDeal > 0 ? ' [DM: apply damage]' : ''}`,
+      wouldDeal > 0 ? 'damage' : 'action'
     );
+
+    if (spellName || concentration) {
+      const tags = [];
+      if (spellName) tags.push(spellName);
+      if (concentration) tags.push('Concentration');
+      addLog(combat, `  ↳ ${tags.join(' · ')}`, 'action');
+    }
+    if (params.isDot && params.spellDescription) {
+      addLog(combat, `  ${params.spellDescription}`, 'action');
+    }
 
     if (actor) actor.actionSpent = true;
   }
 
   else if (actionType === 'autoHit') {
-    // Auto-hit damage — no attack roll needed (e.g. Magic Missile)
-    const { damageDice = '1d4', damageBonus = 0, damageType = '', targetInstanceId, targetName } = params;
+    const { damageDice = '1d4', damageBonus = 0, damageType = '', targetName, spellName, concentration } = params;
     const dmg      = rollDice(damageDice);
     const totalDmg = Math.max(0, dmg.total + parseInt(damageBonus, 10));
-    const target   = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
-    if (target && totalDmg > 0) {
-      target.currentHp = Math.max(0, target.currentHp - totalDmg);
-      if (target.currentHp === 0) {
-        target.isDefeated = true;
-        addLog(combat, `💀 ${target.name} drops to 0 HP`, 'condition');
-      }
-    }
     addLog(combat,
-      `✦ ${action.submitterName} → ${targetName || '?'}: ${totalDmg} ${damageType} damage (auto-hit: ${damageDice})`,
+      `✦ ${action.submitterName} → ${targetName || '?'}: ${totalDmg} ${damageType} damage (auto-hit: ${damageDice}) [DM: apply damage]`,
       'damage'
     );
+    if (spellName || concentration) {
+      const tags = [];
+      if (spellName) tags.push(spellName);
+      if (concentration) tags.push('Concentration');
+      addLog(combat, `  ↳ ${tags.join(' · ')}`, 'action');
+    }
+    if (params.isDot && params.spellDescription) {
+      addLog(combat, `  ${params.spellDescription}`, 'action');
+    }
     const actor = findActor(combat, action, params);
     if (actor) actor.actionSpent = true;
   }
 
   else if (actionType === 'cast') {
-    // Spell cast — logs the cast and optionally applies a DoT marker to the target
-    const { spellName, isDot = false, damageDice, damageType = '', targetInstanceId, targetName } = params;
-    addLog(combat, `✦ ${action.submitterName} casts ${spellName || action.description}`, 'action');
+    // Spell cast — logs the cast, shows spell info, and optionally applies a DoT marker
+    const { spellName, isDot = false, damageDice, damageType = '', concentration, targetInstanceId, targetName, spellDescription } = params;
+    const castLabel = spellName || action.description;
+    const infoParts = [];
+    if (damageDice) infoParts.push(`${damageDice}${damageType ? ` ${damageType}` : ''}`);
+    if (concentration) infoParts.push('Concentration');
+    addLog(combat, `✦ ${action.submitterName} casts ${castLabel}${infoParts.length ? ` [${infoParts.join(', ')}]` : ''}`, 'action');
+
     if (isDot && targetInstanceId) {
       const target = combat.initiativeOrder.find(c => c.instanceId === targetInstanceId);
       if (target) {
@@ -713,7 +710,11 @@ async function resolveAction(combat, action, params, io, room) {
           sourceInstanceId: params.actorInstanceId || '',
           appliedRound:     combat.round,
         });
-        addLog(combat, `🔥 ${spellName} DoT applied to ${targetName || '?'}`, 'condition');
+        addLog(combat, `🔥 ${castLabel} DoT applied to ${targetName || '?'}`, 'condition');
+      }
+      // Log spell description so DM knows what the ongoing effect does
+      if (spellDescription) {
+        addLog(combat, `  ${spellDescription}`, 'action');
       }
     }
     const actor = findActor(combat, action, params);
