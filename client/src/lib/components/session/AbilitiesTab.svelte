@@ -48,6 +48,80 @@
 
   const HALF_CASTERS  = new Set(['Paladin', 'Ranger']);
   const THIRD_CASTERS = new Set(['Artificer']);
+  const FULL_CASTER_SLOT_CLASSES = new Set(['Wizard', 'Sorcerer']);
+
+  // [level1..level9] indexed by character level 1-20
+  const FULL_CASTER_SLOTS = [
+    null,
+    [2,0,0,0,0,0,0,0,0],[3,0,0,0,0,0,0,0,0],[4,2,0,0,0,0,0,0,0],[4,3,0,0,0,0,0,0,0],
+    [4,3,2,0,0,0,0,0,0],[4,3,3,0,0,0,0,0,0],[4,3,3,1,0,0,0,0,0],[4,3,3,2,0,0,0,0,0],
+    [4,3,3,3,1,0,0,0,0],[4,3,3,3,2,0,0,0,0],[4,3,3,3,2,1,0,0,0],[4,3,3,3,2,1,0,0,0],
+    [4,3,3,3,2,1,1,0,0],[4,3,3,3,2,1,1,0,0],[4,3,3,3,2,1,1,1,0],[4,3,3,3,2,1,1,1,0],
+    [4,3,3,3,2,1,1,1,1],[4,3,3,3,3,1,1,1,1],[4,3,3,3,3,2,1,1,1],[4,3,3,3,3,2,2,1,1],
+  ];
+
+  function warlockPactLevel(lvl) {
+    if (lvl >= 9) return 5; if (lvl >= 7) return 4;
+    if (lvl >= 5) return 3; if (lvl >= 3) return 2;
+    return 1;
+  }
+  function warlockPactCount(lvl) {
+    if (lvl >= 17) return 4; if (lvl >= 11) return 3;
+    if (lvl >= 2) return 2; return 1;
+  }
+  function warlockArcanumLevels(lvl) {
+    const a = [];
+    if (lvl >= 11) a.push(6); if (lvl >= 13) a.push(7);
+    if (lvl >= 15) a.push(8); if (lvl >= 17) a.push(9);
+    return a;
+  }
+  function ordinal(n) {
+    return n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
+  }
+
+  let localSlotData = null;
+  $: if (selectedChar) localSlotData = null;
+  $: slotData = localSlotData ?? (selectedChar?.spellSlots ?? {});
+  $: isFullCasterSlot = FULL_CASTER_SLOT_CLASSES.has(selectedChar?.class ?? '');
+  $: isWarlock = selectedChar?.class === 'Warlock';
+  $: showSpellSlots = isFullCasterSlot || isWarlock;
+
+  function knownSpellsOfLevel(level) {
+    return (selectedChar?.knownSpells ?? []).filter(s => s && s.name && s.level === level);
+  }
+  function warlockPactSpells(pactLevel) {
+    return (selectedChar?.knownSpells ?? []).filter(s => s && s.name && s.level > 0 && s.level <= pactLevel);
+  }
+
+  async function saveSlotData(updated) {
+    localSlotData = updated;
+    if (!selectedChar) return;
+    try {
+      const res = await fetch(
+        `/api/campaigns/${campaignId}/players/${selectedChar._id}`,
+        { method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ spellSlots: updated }) }
+      );
+      if (res.ok) dispatch('slotUpdate', { playerId: selectedChar._id, spellSlots: updated });
+    } catch { /* silent */ }
+  }
+
+  function toggleSlotUsed(level, pipIdx) {
+    const used = slotData.used?.[level] ?? 0;
+    const newUsed = pipIdx < used ? pipIdx : pipIdx + 1;
+    saveSlotData({ ...slotData, used: { ...(slotData.used ?? {}), [level]: newUsed } });
+  }
+  function setChosenSpell(key, spellId) {
+    saveSlotData({ ...slotData, chosen: { ...(slotData.chosen ?? {}), [key]: spellId } });
+  }
+  function togglePactUsed(pipIdx) {
+    const used = slotData.pactUsed ?? 0;
+    saveSlotData({ ...slotData, pactUsed: pipIdx < used ? pipIdx : pipIdx + 1 });
+  }
+  function toggleArcanumUsed(level) {
+    saveSlotData({ ...slotData, arcanumUsed: { ...(slotData.arcanumUsed ?? {}), [level]: !(slotData.arcanumUsed?.[level] ?? false) } });
+  }
 
   function maxSpellLevel(charLevel, charClass) {
     const lvl = Math.min(charLevel ?? 1, 20);
@@ -242,6 +316,99 @@
           </div>
         {/if}
       </div>
+
+      <!-- ── Spell Slots section ─────────────────────────────────────────── -->
+      {#if showSpellSlots}
+        <div class="section-block">
+          <div class="section-header-row">
+            <span class="section-title">{isWarlock ? 'Pact Magic' : 'Spell Slots'}</span>
+          </div>
+
+          {#if isFullCasterSlot}
+            {@const slots = FULL_CASTER_SLOTS[Math.min(Math.max(selectedChar.level ?? 1, 1), 20)]}
+            <div class="slot-rows">
+              {#each slots as max, i}
+                {#if max > 0}
+                  {@const level = i + 1}
+                  {@const used = slotData.used?.[level] ?? 0}
+                  {@const chosenId = slotData.chosen?.[level] ?? ''}
+                  {@const levelSpells = knownSpellsOfLevel(level)}
+                  <div class="slot-row">
+                    <span class="slot-level-label">{level}{ordinal(level)}</span>
+                    <div class="slot-pips">
+                      {#each {length: max} as _, pipIdx}
+                        <button class="slot-pip" class:used={pipIdx < used}
+                          on:click={() => toggleSlotUsed(level, pipIdx)}
+                          title={pipIdx < used ? 'Restore slot' : 'Use slot'}
+                        ></button>
+                      {/each}
+                    </div>
+                    <select class="slot-spell-select" value={chosenId}
+                      on:change={e => setChosenSpell(level, e.target.value)}>
+                      <option value="">— spell —</option>
+                      {#each levelSpells as spell}
+                        <option value={spell._id}>{spell.name}</option>
+                      {/each}
+                    </select>
+                  </div>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+
+          {#if isWarlock}
+            {@const pactLvl = warlockPactLevel(selectedChar.level ?? 1)}
+            {@const pactCnt = warlockPactCount(selectedChar.level ?? 1)}
+            {@const pactUsed = slotData.pactUsed ?? 0}
+            {@const pactSpells = warlockPactSpells(pactLvl)}
+            {@const arcanumLvls = warlockArcanumLevels(selectedChar.level ?? 1)}
+            <div class="slot-rows">
+              <div class="slot-row">
+                <span class="slot-level-label">{pactLvl}{ordinal(pactLvl)} <span class="slot-pact-tag">Pact</span></span>
+                <div class="slot-pips">
+                  {#each {length: pactCnt} as _, i}
+                    <button class="slot-pip" class:used={i < pactUsed}
+                      on:click={() => togglePactUsed(i)}
+                      title={i < pactUsed ? 'Restore slot' : 'Use slot'}
+                    ></button>
+                  {/each}
+                </div>
+                <select class="slot-spell-select" value={slotData.chosen?.pact ?? ''}
+                  on:change={e => setChosenSpell('pact', e.target.value)}>
+                  <option value="">— spell —</option>
+                  {#each pactSpells as spell}
+                    <option value={spell._id}>{spell.name}</option>
+                  {/each}
+                </select>
+              </div>
+
+              {#if arcanumLvls.length > 0}
+                <div class="arcanum-header">Mystic Arcanum</div>
+                {#each arcanumLvls as alv}
+                  {@const arcanumUsed = slotData.arcanumUsed?.[alv] ?? false}
+                  {@const arcanumSpells = knownSpellsOfLevel(alv)}
+                  <div class="slot-row">
+                    <span class="slot-level-label">{alv}{ordinal(alv)}</span>
+                    <div class="slot-pips">
+                      <button class="slot-pip" class:used={arcanumUsed}
+                        on:click={() => toggleArcanumUsed(alv)}
+                        title={arcanumUsed ? 'Restore' : 'Use'}
+                      ></button>
+                    </div>
+                    <select class="slot-spell-select" value={slotData.chosen?.[`arcanum_${alv}`] ?? ''}
+                      on:change={e => setChosenSpell(`arcanum_${alv}`, e.target.value)}>
+                      <option value="">— spell —</option>
+                      {#each arcanumSpells as spell}
+                        <option value={spell._id}>{spell.name}</option>
+                      {/each}
+                    </select>
+                  </div>
+                {/each}
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       <!-- ── Known Spells section ──────────────────────────────────────────── -->
       <div class="section-block">
@@ -811,5 +978,68 @@
     text-align: center;
     color: var(--text-muted);
     font-size: 0.875rem;
+  }
+
+  /* ── Spell Slots ─────────────────────────────────────────────────────────── */
+  .slot-rows { display: flex; flex-direction: column; gap: 0.3rem; }
+  .slot-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.5rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .slot-level-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    width: 4rem;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .slot-pact-tag {
+    font-size: 0.6rem;
+    font-weight: 700;
+    background: #ede9fe;
+    border: 1px solid #ddd6fe;
+    border-radius: 99px;
+    padding: 0 0.3rem;
+    color: #5b21b6;
+  }
+  .slot-pips { display: flex; gap: 0.25rem; flex-shrink: 0; }
+  .slot-pip {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--primary, #60a5fa);
+    background: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.1s, opacity 0.1s;
+    flex-shrink: 0;
+  }
+  .slot-pip.used { background: var(--primary, #60a5fa); opacity: 0.45; }
+  .slot-pip:hover { opacity: 0.75; }
+  .slot-spell-select {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.75rem;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.1rem 0.3rem;
+  }
+  .arcanum-header {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-faint);
+    padding: 0.25rem 0.5rem 0;
   }
 </style>

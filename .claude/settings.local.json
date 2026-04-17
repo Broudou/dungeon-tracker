@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(find /c/Users/broud/Documents/Dev/dungeon-tracker/server/models -name \"*.js\" -exec grep -l \"player\\\\|character\\\\|Player\\\\|Character\" {} \\\\;)"
     ]
   }
 }

@@ -572,6 +572,11 @@
           p._id === playerId ? { ...p, stats } : p
         )};
       }}
+      on:slotUpdate={({ detail: { playerId, spellSlots } }) => {
+        campaignData = { ...campaignData, players: campaignData.players.map(p =>
+          p._id === playerId ? { ...p, spellSlots } : p
+        )};
+      }}
     />
   </div>
 {/if}
