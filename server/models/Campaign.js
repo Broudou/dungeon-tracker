@@ -1,5 +1,16 @@
 const mongoose = require('mongoose');
 
+// ── SpellSlotSchema ───────────────────────────────────────────────────────────
+// One individual spell slot for a caster. `level` is the slot level (1–9),
+// `index` is the 0-based position within that level, and `spell` is an
+// optional reference to the spell assigned to this slot.
+const SpellSlotSchema = new mongoose.Schema({
+  level: { type: Number, required: true, min: 1, max: 9 },
+  index: { type: Number, required: true, min: 0 },
+  spell: { type: mongoose.Schema.Types.ObjectId, ref: 'Spell', default: null },
+  used:  { type: Boolean, default: false },
+}, { _id: false });
+
 // ── InventoryItemSchema ───────────────────────────────────────────────────────
 // A single item in a player's inventory. Embedded in PlayerSchema.
 // `equipped` is a UI hint — no mechanical effect is enforced server-side.
@@ -51,9 +62,9 @@ const PlayerSchema = new mongoose.Schema({
 
   inventory: [InventoryItemSchema],
 
-  // Spell slot tracking: keys "1"–"9" → { max: Number, used: Number }
-  // Using Mixed so the DM can support any caster type without a rigid schema.
-  spellSlots: { type: mongoose.Schema.Types.Mixed, default: {} },
+  // Per-slot state: each entry is one physical spell slot with its level,
+  // position index, assigned spell, and expended flag.
+  spellSlots: [SpellSlotSchema],
 
   // Full spell library available to this character (references Spell collection)
   knownSpells: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Spell' }],
